@@ -1,4 +1,5 @@
 import json
+import html
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -42,6 +43,7 @@ SIGNAL_COLUMNS = [
     "OBV",
     "OBV_MA20",
 ]
+WATCHLIST_MAX_COUNT = 20
 
 
 def normalize_ticker(ticker):
@@ -279,6 +281,44 @@ def load_custom_css():
                 border-radius: 12px;
                 overflow: hidden;
                 box-shadow: 0 10px 26px rgba(15, 23, 42, 0.04);
+            }
+
+            .candidate-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                gap: 12px;
+                margin: 8px 0 18px 0;
+            }
+
+            .candidate-card {
+                background: #ffffff;
+                border: 1px solid var(--line);
+                border-radius: 12px;
+                padding: 14px 15px;
+                box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+                min-height: 132px;
+            }
+
+            .candidate-card .ticker {
+                font-size: 0.86rem;
+                color: var(--muted);
+                font-weight: 800;
+                margin-bottom: 6px;
+            }
+
+            .candidate-card .score {
+                font-size: 1.55rem;
+                line-height: 1.2;
+                font-weight: 900;
+                color: var(--text);
+                margin-bottom: 8px;
+                white-space: nowrap;
+            }
+
+            .candidate-card .meta {
+                font-size: 0.82rem;
+                line-height: 1.5;
+                color: #374151;
             }
 
             @media (max-width: 900px) {
@@ -1530,56 +1570,315 @@ def render_intraday_summary(df, result):
                 st.write(f"- {comment}")
 
 
-def main():
-    if "analysis_started" not in st.session_state:
-        st.session_state.analysis_started = False
+def parse_watchlist_input(text, max_count=WATCHLIST_MAX_COUNT):
+    raw_items = text.replace(",", "\n").splitlines()
+    tickers = []
+    seen = set()
 
-    load_custom_css()
+    for item in raw_items:
+        ticker = normalize_ticker(item.strip())
 
-    st.markdown(
-        """
-        <div class="hero">
-            <div class="eyebrow">개인용 주식 분석 대시보드</div>
-            <h1>이영록 스톡랩</h1>
-            <p>
-                기술적 지표와 공개 정보를 함께 확인하는 판단 보조 도구입니다.
-                일봉 가격, 거래량, 모멘텀, 추세 강도, 변동성, 공시/뉴스 참고 정보를 한 화면에서 점검합니다.
-            </p>
-            <div class="notice-row">
-                <div class="notice">본 프로그램은 실제 투자 조언이 아닌 기술적 분석 및 공개 정보 확인을 위한 개인용 판단 보조 도구입니다.</div>
-                <div class="notice">yfinance 데이터는 실제 증권사/거래소 데이터와 차이가 있을 수 있으며, 분봉 데이터는 실시간 시세가 아니라 지연될 수 있습니다.</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+        if not ticker or ticker in seen:
+            continue
+
+        tickers.append(ticker)
+        seen.add(ticker)
+
+    return tickers[:max_count], max(0, len(tickers) - max_count)
+
+
+def get_macd_status(latest):
+    if pd.isna(latest["MACD"]) or pd.isna(latest["MACD_Signal"]):
+        return "판단 불가"
+    if latest["MACD"] > latest["MACD_Signal"]:
+        return "MACD 우위"
+    if latest["MACD"] < latest["MACD_Signal"]:
+        return "MACD 약세"
+    return "MACD 중립"
+
+
+def get_volume_status(latest, previous):
+    if pd.isna(latest["Volume_MA20"]) or latest["Volume_MA20"] == 0:
+        return "판단 불가", 5
+
+    volume_ratio = latest["Volume"] / latest["Volume_MA20"]
+
+    if volume_ratio >= 1.5 and latest["Close"] > previous["Close"]:
+        return "거래량 증가", 8
+    if volume_ratio >= 1.1 and latest["Close"] >= previous["Close"]:
+        return "평균 이상", 7
+    if latest["Volume"] > previous["Volume"] and latest["Close"] < previous["Close"]:
+        return "하락 거래량 증가", 3
+    if volume_ratio < 0.7:
+        return "거래량 둔화", 4
+    return "평균 수준", 5
+
+
+def get_volatility_score(risk_level):
+    if risk_level == "낮음":
+        return 7
+    if risk_level == "보통":
+        return 5
+    if risk_level == "높음":
+        return 3
+    return 5
+
+
+def get_dart_disclosure_status(ticker, api_key):
+    stock_code = get_stock_code(ticker)
+
+    if not stock_code:
+        return "해당 없음", pd.DataFrame()
+
+    if not api_key:
+        return "확인 실패", pd.DataFrame()
+
+    try:
+        disclosures = get_recent_disclosures(stock_code, api_key)
+    except Exception:
+        return "확인 실패", pd.DataFrame()
+
+    if disclosures.empty:
+        return "공시 없음", disclosures
+
+    return "공시 있음", disclosures
+
+
+def calculate_watchlist_score(daily_result, intraday_result, latest, disclosures):
+    daily_score = daily_result.get("technical_score") or 5
+    intraday_score = intraday_result.get("flow_score") or 5
+    volume_score = latest.get("_volume_score", 5)
+    volatility_score = get_volatility_score(daily_result.get("risk_level"))
+    total_score = (daily_score * 0.5) + (intraday_score * 0.3) + (volume_score * 0.1) + (volatility_score * 0.1)
+
+    return clamp_score(total_score)
+
+
+def classify_watchlist_candidate(row):
+    daily_score = row.get("일봉 기술 점수", 0)
+    intraday_score = row.get("당일 흐름 점수", 0)
+    rsi = row.get("RSI", np.nan)
+
+    if row.get("DART 공시 여부") == "공시 있음":
+        return "공시 확인 필요"
+    if row.get("변동성 리스크") == "높음":
+        return "변동성 주의"
+    if pd.notna(rsi) and rsi >= 70:
+        return "과열 주의"
+    if daily_score >= 7 and intraday_score >= 7:
+        return "당일 흐름 우세 후보"
+    if daily_score >= 7 and pd.notna(rsi) and 45 <= rsi <= 65:
+        return "상승 추세 후보"
+    if daily_score >= 5 and pd.notna(rsi) and rsi <= 35:
+        return "눌림목 점검 후보"
+    if "증가" in str(row.get("거래량 상태", "")):
+        return "거래량 증가 후보"
+    return "관망 후보"
+
+
+def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_key):
+    normalized_ticker = normalize_ticker(ticker)
+
+    try:
+        daily_df = get_daily_data(normalized_ticker, daily_period)
+
+        if daily_df.empty or len(daily_df) < 60:
+            raise ValueError("일봉 데이터 부족")
+
+        analyzed_df = calculate_indicators(daily_df)
+        valid_df = analyzed_df.dropna(subset=SIGNAL_COLUMNS)
+
+        if len(valid_df) < 2:
+            raise ValueError("기술적 지표 데이터 부족")
+
+        daily_result = calculate_signal(analyzed_df)
+        latest = valid_df.iloc[-1]
+        previous = valid_df.iloc[-2]
+        intraday_df = get_intraday_data(normalized_ticker, intraday_interval)
+
+        if intraday_df.empty:
+            intraday_result = {"flow_score": None, "flow_signal": "분석 불가"}
+        else:
+            intraday_result = calculate_intraday_signal(calculate_intraday_indicators(intraday_df), intraday_interval)
+
+        disclosure_status, disclosures = get_dart_disclosure_status(normalized_ticker, dart_api_key)
+        volume_status, volume_score = get_volume_status(latest, previous)
+        score_latest = latest.copy()
+        score_latest["_volume_score"] = volume_score
+
+        row = {
+            "종목 코드": normalized_ticker,
+            "일봉 기술 점수": daily_result["technical_score"],
+            "일봉 보조 판단": daily_result["signal"],
+            "당일 흐름 점수": intraday_result.get("flow_score") if intraday_result.get("flow_score") is not None else np.nan,
+            "당일 흐름 판단": intraday_result.get("flow_signal", "분석 불가"),
+            "RSI": round(float(latest["RSI"]), 2),
+            "MACD 상태": get_macd_status(latest),
+            "거래량 상태": volume_status,
+            "변동성 리스크": daily_result["risk_level"],
+            "DART 공시 여부": disclosure_status,
+            "점검 유형": "관망 후보",
+            "종합 점검 점수": calculate_watchlist_score(daily_result, intraday_result, score_latest, disclosures),
+        }
+        row["점검 유형"] = classify_watchlist_candidate(row)
+
+        return row
+    except Exception as error:
+        return {
+            "종목 코드": normalized_ticker,
+            "일봉 기술 점수": np.nan,
+            "일봉 보조 판단": "분석 실패",
+            "당일 흐름 점수": np.nan,
+            "당일 흐름 판단": "분석 실패",
+            "RSI": np.nan,
+            "MACD 상태": "분석 실패",
+            "거래량 상태": "분석 실패",
+            "변동성 리스크": "분석 실패",
+            "DART 공시 여부": "확인 실패" if get_stock_code(normalized_ticker) else "해당 없음",
+            "점검 유형": "분석 실패",
+            "종합 점검 점수": 1,
+            "오류": str(error),
+        }
+
+
+def render_watchlist_priority_cards(result_df):
+    valid_df = result_df[result_df["점검 유형"] != "분석 실패"].head(5)
+
+    if valid_df.empty:
+        return
+
+    st.subheader("점검 우선 후보")
+    card_html = "<div class='candidate-grid'>"
+
+    for _, row in valid_df.iterrows():
+        card_html += (
+            "<div class='candidate-card'>"
+            f"<div class='ticker'>{html.escape(str(row['종목 코드']))}</div>"
+            f"<div class='score'>{row['종합 점검 점수']} / 10</div>"
+            "<div class='meta'>"
+            f"일봉: {html.escape(str(row['일봉 보조 판단']))}<br>"
+            f"당일: {html.escape(str(row['당일 흐름 판단']))}<br>"
+            f"유형: {html.escape(str(row['점검 유형']))}"
+            "</div>"
+            "</div>"
+        )
+
+    card_html += "</div>"
+    st.markdown(card_html, unsafe_allow_html=True)
+
+
+def render_watchlist_scanner(dart_api_key):
+    st.subheader("관심종목 스캐너")
+    st.write("여러 종목을 한 번에 점검해 오늘 먼저 살펴볼 분석 후보를 정리합니다.")
+    st.caption("이 영역은 투자 판단을 대신하지 않으며, 기술적 조건과 공개 정보 확인을 위한 판단 보조 화면입니다.")
+
+    default_watchlist = "005930.KS, 000660.KS, 035420.KS, 051910.KS, AAPL, MSFT, NVDA, TSLA"
+    watchlist_text = st.text_area(
+        "관심종목 코드를 입력하세요",
+        value=default_watchlist,
+        height=120,
+        help="쉼표 또는 줄바꿈으로 구분하세요. 6자리 한국 종목 코드는 자동으로 .KS가 붙습니다.",
     )
 
-    dart_api_key = get_dart_api_key()
-    dart_available = bool(dart_api_key)
+    scanner_col1, scanner_col2 = st.columns([1, 1])
+    with scanner_col1:
+        scanner_period_option = st.selectbox("스캐너 일봉 기간", ["3개월", "6개월", "1년"], index=1)
+    with scanner_col2:
+        scanner_interval = st.selectbox("스캐너 분봉 간격", ["5m", "15m", "30m", "60m"], index=0)
 
-    with st.sidebar:
-        st.header("분석 설정")
-        ticker = st.text_input("종목 코드를 입력하세요", value="005930.KS", help="예: 005930.KS, 005930, AAPL, MSFT, TSLA")
-        period_option = st.selectbox("일봉 분석 기간", ["3개월", "6개월", "1년", "2년", "5년"], index=2)
-        period_map = {"3개월": "3mo", "6개월": "6mo", "1년": "1y", "2년": "2y", "5년": "5y"}
-        show_intraday = st.checkbox("분봉 참고 차트 표시", value=True)
-        intraday_interval = st.selectbox("분봉 간격", ["1m", "5m", "15m", "30m", "60m"], index=1)
-        show_dart = st.checkbox("DART 공시 참고 영역 표시", value=dart_available, disabled=not dart_available)
-        if dart_available:
-            st.caption(f"DART API 키가 설정되어 있습니다. 키 길이: {len(dart_api_key)}자리")
+    period_map = {"3개월": "3mo", "6개월": "6mo", "1년": "1y"}
+    analyze_watchlist = st.button("관심종목 분석 후보 찾기", type="primary")
+
+    if analyze_watchlist:
+        tickers, overflow_count = parse_watchlist_input(watchlist_text)
+
+        if not tickers:
+            st.warning("분석할 관심종목 코드를 입력하세요.")
         else:
-            st.caption("DART API 키를 한 번 설정하면 공시 기능이 자동으로 활성화됩니다.")
-        show_news = st.checkbox("뉴스 참고 영역 표시", value=True)
-        auto_refresh = st.checkbox("30분마다 자동 새로고침", value=False)
-        analyze = st.button("분석 시작", type="primary", use_container_width=True)
+            if overflow_count > 0:
+                st.info(f"최대 {WATCHLIST_MAX_COUNT}개까지만 분석합니다. 초과 입력된 {overflow_count}개 종목은 이번 분석에서 제외했습니다.")
 
-    if auto_refresh:
-        enable_auto_refresh(minutes=30)
-        st.caption("자동 새로고침이 켜져 있습니다. 30분마다 페이지를 다시 불러옵니다.")
+            rows = []
+            progress = st.progress(0, text="관심종목을 분석하는 중입니다...")
 
-    if analyze:
-        st.session_state.analysis_started = True
+            for index, ticker in enumerate(tickers, start=1):
+                rows.append(analyze_watchlist_ticker(ticker, period_map[scanner_period_option], scanner_interval, dart_api_key))
+                progress.progress(index / len(tickers), text=f"{ticker} 분석 중 ({index}/{len(tickers)})")
 
+            progress.empty()
+            result_df = pd.DataFrame(rows)
+            result_df = result_df.sort_values("종합 점검 점수", ascending=False).reset_index(drop=True)
+            st.session_state.watchlist_result = result_df
+
+    result_df = st.session_state.get("watchlist_result", pd.DataFrame())
+
+    if result_df.empty:
+        st.info("관심종목을 입력한 뒤 분석 후보 찾기를 누르면 오늘의 분석 후보가 표시됩니다.")
+        return
+
+    render_watchlist_priority_cards(result_df)
+
+    st.subheader("오늘의 분석 후보")
+    filter_options = [
+        "전체",
+        "상승 추세 후보",
+        "당일 흐름 우세 후보",
+        "눌림목 점검 후보",
+        "거래량 증가 후보",
+        "공시 확인 필요",
+        "변동성 주의",
+        "과열 주의",
+        "관망 후보",
+        "분석 실패",
+    ]
+    selected_filter = st.selectbox("점검 유형 필터", filter_options)
+
+    display_df = result_df.copy()
+
+    if selected_filter != "전체":
+        display_df = display_df[display_df["점검 유형"] == selected_filter]
+
+    display_columns = [
+        "종목 코드",
+        "일봉 기술 점수",
+        "일봉 보조 판단",
+        "당일 흐름 점수",
+        "당일 흐름 판단",
+        "RSI",
+        "MACD 상태",
+        "거래량 상태",
+        "변동성 리스크",
+        "DART 공시 여부",
+        "점검 유형",
+        "종합 점검 점수",
+    ]
+    st.dataframe(display_df[display_columns], use_container_width=True, hide_index=True)
+    st.caption("종합 점검 점수는 정렬용 참고 점수이며, 일봉 기술 점수와 당일 흐름 점수를 대체하지 않습니다.")
+
+
+def render_usage_guide():
+    st.subheader("사용 안내")
+    st.markdown(
+        """
+        - 본 프로그램은 실제 투자 조언이 아닌 기술적 분석 및 공개 정보 확인을 위한 개인용 판단 보조 도구입니다.
+        - yfinance 데이터는 실제 증권사/거래소 데이터와 차이가 있을 수 있으며, 분봉 데이터는 실시간 시세가 아니라 지연될 수 있습니다.
+        - 공시와 뉴스는 기술적 점수에 직접 반영하지 않고 참고 정보로만 표시합니다.
+        - 관심종목 스캐너의 분석 후보는 먼저 점검할 대상을 정리하는 기능이며 매매 판단을 대신하지 않습니다.
+        - DART 공시는 한국 6자리 종목 코드에서만 조회되며, 미국 종목은 해당 없음으로 표시됩니다.
+        """
+    )
+
+
+def render_single_stock_analysis(
+    ticker,
+    period_option,
+    period_map,
+    show_intraday,
+    intraday_interval,
+    show_dart,
+    show_news,
+    dart_api_key,
+):
     if not st.session_state.analysis_started:
         st.markdown(
             """
@@ -1734,6 +2033,82 @@ def main():
     with data_tab:
         display_columns = [column for column in SIGNAL_COLUMNS if column in valid_df.columns]
         st.dataframe(valid_df[display_columns].tail(120).sort_index(ascending=False), use_container_width=True)
+
+
+def render_hero():
+    st.markdown(
+        """
+        <div class="hero">
+            <div class="eyebrow">기술적 분석 기반 판단 보조 대시보드</div>
+            <h1>이영록 스톡랩</h1>
+            <p>
+                기술적 지표와 공개 정보를 함께 확인하는 판단 보조 도구입니다.
+                단일 종목 상세 분석과 관심종목 스캐너를 통해 점검 우선 종목과 참고 신호를 한 화면에서 정리합니다.
+            </p>
+            <div class="notice-row">
+                <div class="notice">본 프로그램은 실제 투자 조언이 아닌 기술적 분석 및 공개 정보 확인을 위한 개인용 판단 보조 도구입니다.</div>
+                <div class="notice">yfinance 데이터는 실제 증권사/거래소 데이터와 차이가 있을 수 있으며, 분봉 데이터는 실시간 시세가 아니라 지연될 수 있습니다.</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def main():
+    if "analysis_started" not in st.session_state:
+        st.session_state.analysis_started = False
+
+    load_custom_css()
+    render_hero()
+
+    dart_api_key = get_dart_api_key()
+    dart_available = bool(dart_api_key)
+    period_map = {"3개월": "3mo", "6개월": "6mo", "1년": "1y", "2년": "2y", "5년": "5y"}
+
+    with st.sidebar:
+        st.header("분석 설정")
+        ticker = st.text_input("종목 코드를 입력하세요", value="005930.KS", help="예: 005930.KS, 005930, AAPL, MSFT, TSLA")
+        period_option = st.selectbox("일봉 분석 기간", ["3개월", "6개월", "1년", "2년", "5년"], index=2)
+        show_intraday = st.checkbox("분봉 참고 차트 표시", value=True)
+        intraday_interval = st.selectbox("분봉 간격", ["1m", "5m", "15m", "30m", "60m"], index=1)
+        show_dart = st.checkbox("DART 공시 참고 영역 표시", value=dart_available, disabled=not dart_available)
+
+        if dart_available:
+            st.caption(f"DART API 키가 설정되어 있습니다. 키 길이: {len(dart_api_key)}자리")
+        else:
+            st.caption("DART API 키를 한 번 설정하면 공시 기능이 자동으로 활성화됩니다.")
+
+        show_news = st.checkbox("뉴스 참고 영역 표시", value=True)
+        auto_refresh = st.checkbox("30분마다 자동 새로고침", value=False)
+        analyze = st.button("분석 시작", type="primary", use_container_width=True)
+
+    if auto_refresh:
+        enable_auto_refresh(minutes=30)
+        st.caption("자동 새로고침이 켜져 있습니다. 30분마다 페이지를 다시 불러옵니다.")
+
+    if analyze:
+        st.session_state.analysis_started = True
+
+    single_tab, scanner_tab, guide_tab = st.tabs(["단일 종목 분석", "관심종목 스캐너", "사용 안내"])
+
+    with single_tab:
+        render_single_stock_analysis(
+            ticker=ticker,
+            period_option=period_option,
+            period_map=period_map,
+            show_intraday=show_intraday,
+            intraday_interval=intraday_interval,
+            show_dart=show_dart,
+            show_news=show_news,
+            dart_api_key=dart_api_key,
+        )
+
+    with scanner_tab:
+        render_watchlist_scanner(dart_api_key)
+
+    with guide_tab:
+        render_usage_guide()
 
 
 if __name__ == "__main__":
