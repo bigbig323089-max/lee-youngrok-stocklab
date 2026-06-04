@@ -1315,6 +1315,25 @@ def get_dart_api_key():
     return ""
 
 
+def parse_dart_error_message(data):
+    text = data.decode("utf-8", errors="ignore").strip()
+
+    try:
+        root = ET.fromstring(text)
+        status = root.findtext("status") or root.findtext(".//status") or "-"
+        message = root.findtext("message") or root.findtext(".//message") or "DART 오류 응답"
+        return f"{message} (status: {status})"
+    except ET.ParseError:
+        pass
+
+    preview = " ".join(text.split())[:180]
+
+    if preview:
+        return f"DART가 ZIP이 아닌 응답을 반환했습니다. 응답 일부: {preview}"
+
+    return "DART가 빈 응답 또는 ZIP이 아닌 응답을 반환했습니다."
+
+
 @st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
 def get_dart_corp_code_map(api_key):
     url = f"https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key={urllib.parse.quote(api_key)}"
@@ -1322,7 +1341,14 @@ def get_dart_corp_code_map(api_key):
     with urllib.request.urlopen(url, timeout=20) as response:
         data = response.read()
 
-    with zipfile.ZipFile(BytesIO(data)) as zip_file:
+    zip_buffer = BytesIO(data)
+
+    if not zipfile.is_zipfile(zip_buffer):
+        raise ValueError(parse_dart_error_message(data))
+
+    zip_buffer.seek(0)
+
+    with zipfile.ZipFile(zip_buffer) as zip_file:
         xml_data = zip_file.read("CORPCODE.xml")
 
     root = ET.fromstring(xml_data)
@@ -1539,7 +1565,9 @@ def main():
         show_intraday = st.checkbox("분봉 참고 차트 표시", value=True)
         intraday_interval = st.selectbox("분봉 간격", ["1m", "5m", "15m", "30m", "60m"], index=1)
         show_dart = st.checkbox("DART 공시 참고 영역 표시", value=dart_available, disabled=not dart_available)
-        if not dart_available:
+        if dart_available:
+            st.caption(f"DART API 키가 설정되어 있습니다. 키 길이: {len(dart_api_key)}자리")
+        else:
             st.caption("DART API 키를 한 번 설정하면 공시 기능이 자동으로 활성화됩니다.")
         show_news = st.checkbox("뉴스 참고 영역 표시", value=True)
         auto_refresh = st.checkbox("30분마다 자동 새로고침", value=False)
