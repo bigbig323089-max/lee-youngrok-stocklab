@@ -1,12 +1,14 @@
 import json
 import html
+import contextlib
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import date, datetime, timedelta
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +30,7 @@ SIGNAL_COLUMNS = [
     "Close",
     "Volume",
     "MA5",
+    "MA10",
     "MA20",
     "MA60",
     "Volume_MA20",
@@ -431,6 +434,11 @@ def get_period_lookback_days(period):
 
 def is_kis_domestic_supported(ticker):
     return bool(get_stock_code(ticker))
+
+
+def safe_yfinance_download(**kwargs):
+    with contextlib.redirect_stdout(StringIO()), contextlib.redirect_stderr(StringIO()):
+        return yf.download(**kwargs)
 
 
 def enable_auto_refresh(minutes=30):
@@ -1025,7 +1033,7 @@ def get_daily_data(ticker, period, preferred_source="auto"):
         else:
             fallback_reason = "KIS API 키가 설정되지 않아 yfinance를 사용했습니다."
 
-    df = yf.download(
+    df = safe_yfinance_download(
         tickers=ticker,
         period=period,
         interval="1d",
@@ -1068,7 +1076,7 @@ def get_intraday_data(ticker, interval, preferred_source="auto"):
         else:
             fallback_reason = "KIS API 키가 설정되지 않아 yfinance를 사용했습니다."
 
-    df = yf.download(
+    df = safe_yfinance_download(
         tickers=ticker,
         period=period,
         interval=interval,
@@ -1318,6 +1326,7 @@ def calculate_indicators(df):
     analyzed = df.copy()
 
     analyzed["MA5"] = analyzed["Close"].rolling(window=5).mean()
+    analyzed["MA10"] = analyzed["Close"].rolling(window=10).mean()
     analyzed["MA20"] = analyzed["Close"].rolling(window=20).mean()
     analyzed["MA60"] = analyzed["Close"].rolling(window=60).mean()
     analyzed["Volume_MA20"] = analyzed["Volume"].rolling(window=20).mean()
@@ -2609,17 +2618,61 @@ def parse_dart_error_message(data):
     return "DART가 빈 응답 또는 ZIP이 아닌 응답을 반환했습니다."
 
 
+class DartServiceError(Exception):
+    pass
+
+
+def format_dart_error_message(error):
+    message = str(error)
+    lowered = message.lower()
+
+    if isinstance(error, (TimeoutError, socket.timeout)) or "timed out" in lowered or "timeout" in lowered:
+        return "DART 서버 응답이 지연되어 공시를 가져오지 못했습니다. 잠시 후 다시 시도하세요."
+    if isinstance(error, urllib.error.HTTPError):
+        return f"DART 서버 HTTP 오류가 발생했습니다. 잠시 후 다시 시도하세요. (상태 코드: {error.code})"
+    if isinstance(error, urllib.error.URLError):
+        reason = str(getattr(error, "reason", "네트워크 오류"))
+        if "timed out" in reason.lower() or "timeout" in reason.lower():
+            return "DART 서버 응답이 지연되어 공시를 가져오지 못했습니다. 잠시 후 다시 시도하세요."
+        return "DART 서버에 연결하지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도하세요."
+    if "등록되지 않은 인증키" in message or "status: 010" in message:
+        return "DART 인증키가 등록되지 않았거나 사용할 수 없습니다. Streamlit Secrets의 DART_API_KEY를 확인하세요."
+    if "ZIP이 아닌 응답" in message or "zip" in lowered:
+        return "DART 응답 형식이 예상과 달라 공시를 가져오지 못했습니다. 인증키와 DART 서버 상태를 확인하세요."
+    if "빈 응답" in message:
+        return "DART가 빈 응답을 반환했습니다. 잠시 후 다시 시도하세요."
+
+    return "DART 공시 조회 중 일시적인 문제가 발생했습니다. 잠시 후 다시 시도하세요."
+
+
+def read_dart_url(url, timeout=12, retries=1):
+    last_error = None
+
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as response:
+                return response.read()
+        except Exception as error:
+            last_error = error
+            if attempt < retries and (
+                isinstance(error, (TimeoutError, socket.timeout, urllib.error.URLError))
+                or "timed out" in str(error).lower()
+            ):
+                continue
+
+    raise DartServiceError(format_dart_error_message(last_error))
+
+
 @st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
 def get_dart_corp_code_map(api_key):
     url = f"https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key={urllib.parse.quote(api_key)}"
 
-    with urllib.request.urlopen(url, timeout=20) as response:
-        data = response.read()
+    data = read_dart_url(url, timeout=12, retries=1)
 
     zip_buffer = BytesIO(data)
 
     if not zipfile.is_zipfile(zip_buffer):
-        raise ValueError(parse_dart_error_message(data))
+        raise DartServiceError(format_dart_error_message(parse_dart_error_message(data)))
 
     zip_buffer.seek(0)
 
@@ -2661,8 +2714,8 @@ def get_recent_disclosures(stock_code, api_key, days=30):
     }
     url = "https://opendart.fss.or.kr/api/list.json?" + urllib.parse.urlencode(params)
 
-    with urllib.request.urlopen(url, timeout=20) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+    data = read_dart_url(url, timeout=12, retries=1)
+    payload = json.loads(data.decode("utf-8"))
 
     if payload.get("status") != "000":
         return pd.DataFrame()
@@ -2741,8 +2794,7 @@ def render_metric_summary(latest, signal_result):
     st.markdown(
         f"""
         <div class="basis-card">
-            <b>데이터 출처:</b> yfinance<br>
-            <b>가격 기준:</b> 일반 Close 기준(auto_adjust=False)<br>
+            <b>요약 기준:</b> 데이터 기준 안내 박스의 출처와 가격 기준을 함께 확인하세요.<br>
             <b>데이터 기준 날짜:</b> {latest.name.date()}<br>
             <b>변동성 리스크:</b> {signal_result['risk_level']} - {signal_result['risk_comment']}
         </div>
@@ -4157,7 +4209,7 @@ def render_single_stock_analysis(
                         st.subheader("최근 DART 공시")
                         st.dataframe(disclosures, use_container_width=True)
                 except Exception as error:
-                    st.info(f"DART 공시 조회 중 문제가 발생했습니다: {error}")
+                    st.info(format_dart_error_message(error))
 
         if show_news:
             try:
