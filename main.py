@@ -742,7 +742,7 @@ def calculate_intraday_signal(df, interval="-"):
         vwap_gap = latest_close / latest["VWAP"] - 1
         if vwap_gap >= 0.01:
             vwap_score = 8
-            vwap_comment = "최근 가격이 VWAP보다 뚜렷하게 높아 당일 매수 흐름이 우세합니다."
+            vwap_comment = "최근 가격이 VWAP보다 뚜렷하게 높아 당일 평균 체결 흐름보다 우세합니다."
         elif vwap_gap > 0:
             vwap_score = 7
             vwap_comment = "최근 가격이 VWAP 위에 있어 당일 흐름이 우호적입니다."
@@ -890,14 +890,46 @@ def calculate_indicators(df):
 
 def score_to_signal(score):
     if score <= 2:
-        return "매도 우세 강함"
+        return "강한 약세 주의"
     if score <= 4:
-        return "매도 우세"
+        return "약세 주의"
     if score <= 6:
-        return "관망 구간"
+        return "관망/확인 구간"
     if score <= 8:
-        return "매수 우세"
-    return "매수 우세 강함"
+        return "상승 관심 조건"
+    return "상승 관심 조건 강함"
+
+
+def score_to_condition_state(score):
+    if pd.isna(score):
+        return "계산 불가"
+    if score <= 4:
+        return "주의 조건"
+    if score <= 6:
+        return "확인 구간"
+    return "관심 조건"
+
+
+def score_to_condition_bucket(score):
+    if pd.isna(score):
+        return "데이터 부족"
+    if score <= 2:
+        return "강한 약세 주의"
+    if score <= 4:
+        return "약세 주의"
+    if score <= 6:
+        return "중립/확인"
+    if score <= 8:
+        return "상승 관심"
+    return "상승 관심 강함"
+
+
+def is_positive_attention_condition(score):
+    return pd.notna(score) and score >= 7
+
+
+def is_negative_caution_condition(score):
+    return pd.notna(score) and score <= 4
 
 
 def clamp_score(score):
@@ -980,7 +1012,7 @@ def get_risk_level(latest):
     if atr_ratio >= 0.06:
         return "높음", "최근 평균 변동폭이 큰 편이므로 진입 시점과 비중 관리에 주의가 필요합니다."
     if atr_ratio >= 0.035:
-        return "보통", "변동성이 보통 이상입니다. 신호를 단독으로 해석하지 않는 편이 좋습니다."
+        return "보통", "변동성이 보통 이상입니다. 조건을 단독으로 해석하지 않는 편이 좋습니다."
     return "낮음", "최근 변동성이 비교적 안정적인 편입니다."
 
 
@@ -1051,32 +1083,32 @@ def calculate_signal(df):
     add_score("이동평균 배열", ma_alignment_score, ma_comment, 1.2)
 
     cross_score = 5
-    cross_comment = "최근 이동평균선 교차 신호가 뚜렷하지 않습니다."
+    cross_comment = "최근 이동평균선 교차 조건이 뚜렷하지 않습니다."
     if yesterday["MA5"] <= yesterday["MA20"] and today["MA5"] > today["MA20"]:
         cross_score = 9
-        cross_comment = "MA5가 MA20을 상향 돌파해 골든크로스 성격의 신호가 있습니다."
+        cross_comment = "MA5가 MA20을 상향 돌파해 단기 흐름 개선 조건이 생겼습니다."
     elif yesterday["MA5"] >= yesterday["MA20"] and today["MA5"] < today["MA20"]:
         cross_score = 2
-        cross_comment = "MA5가 MA20을 하향 돌파해 데드크로스 성격의 신호가 있습니다."
+        cross_comment = "MA5가 MA20을 하향 이탈해 단기 흐름 약화 조건이 생겼습니다."
     add_score("이동평균 교차", cross_score, cross_comment, 0.9)
 
     rsi_score = 5
     rsi_comment = "RSI가 중립 구간에 있습니다."
     if today["RSI"] <= 25:
         rsi_score = 8
-        rsi_comment = "RSI가 깊은 과매도권에 있어 반등 가능성을 참고할 수 있습니다."
+        rsi_comment = "RSI가 깊은 침체권에 있어 반등 여부를 참고할 수 있습니다."
     elif today["RSI"] <= 30:
         rsi_score = 7
-        rsi_comment = "RSI가 과매도 구간에 가깝습니다."
+        rsi_comment = "RSI가 침체 구간에 가깝습니다."
     elif today["RSI"] <= 50:
         rsi_score = 6
         rsi_comment = "RSI가 과열되지 않은 중립 이하 구간입니다."
     elif today["RSI"] >= 75:
         rsi_score = 2
-        rsi_comment = "RSI가 높은 과매수권에 있어 단기 과열 주의가 필요합니다."
+        rsi_comment = "RSI가 높은 과열권에 있어 단기 과열 주의가 필요합니다."
     elif today["RSI"] >= 70:
         rsi_score = 3
-        rsi_comment = "RSI가 과매수 구간에 가깝습니다."
+        rsi_comment = "RSI가 과열 구간에 가깝습니다."
     elif today["RSI"] >= 60:
         rsi_score = 6
         rsi_comment = "RSI가 상승 탄력을 보이나 과열 여부를 함께 봐야 합니다."
@@ -1089,13 +1121,13 @@ def calculate_signal(df):
         macd_comment = "MACD가 Signal 위에 있고 Histogram도 양수라 모멘텀이 우호적입니다."
     if yesterday["MACD"] <= yesterday["MACD_Signal"] and today["MACD"] > today["MACD_Signal"]:
         macd_score = 9
-        macd_comment = "MACD가 Signal을 상향 돌파해 모멘텀 전환 신호가 있습니다."
+        macd_comment = "MACD가 Signal을 상향 돌파해 모멘텀 개선 조건이 생겼습니다."
     if today["MACD"] < today["MACD_Signal"] and today["MACD_Histogram"] < 0:
         macd_score = 4
         macd_comment = "MACD가 Signal 아래에 있고 Histogram도 음수라 모멘텀이 약합니다."
     if yesterday["MACD"] >= yesterday["MACD_Signal"] and today["MACD"] < today["MACD_Signal"]:
         macd_score = 2
-        macd_comment = "MACD가 Signal을 하향 돌파해 모멘텀 약화 신호가 있습니다."
+        macd_comment = "MACD가 Signal을 하향 이탈해 모멘텀 약화 조건이 생겼습니다."
     add_score("MACD", macd_score, macd_comment, 1.2)
 
     volume_ratio = today["Volume"] / today["Volume_MA20"] if today["Volume_MA20"] else np.nan
@@ -1109,10 +1141,10 @@ def calculate_signal(df):
         volume_comment = "평균보다 높은 거래량에서 가격이 상승했습니다."
     elif today["Volume"] > yesterday["Volume"] and today["Close"] < yesterday["Close"]:
         volume_score = 3
-        volume_comment = "거래량은 늘었지만 가격이 하락해 매도 압력을 주의해야 합니다."
+        volume_comment = "거래량은 늘었지만 가격이 하락해 하락 압력을 주의해야 합니다."
     elif pd.notna(volume_ratio) and volume_ratio < 0.7:
         volume_score = 4
-        volume_comment = "거래량이 평균보다 낮아 신호 신뢰도가 제한될 수 있습니다."
+        volume_comment = "거래량이 평균보다 낮아 조건 신뢰도가 제한될 수 있습니다."
     add_score("거래량", volume_score, volume_comment, 0.9)
 
     band_position = (today["Close"] - today["Bollinger_Lower"]) / (today["Bollinger_Upper"] - today["Bollinger_Lower"])
@@ -1120,7 +1152,7 @@ def calculate_signal(df):
     bollinger_comment = "종가가 볼린저 밴드 중간권에 있습니다."
     if band_position <= 0.05:
         bollinger_score = 8
-        bollinger_comment = "종가가 볼린저 밴드 하단권에 있어 과매도 가능성을 참고할 수 있습니다."
+        bollinger_comment = "종가가 볼린저 밴드 하단권에 있어 침체권 진입 여부를 참고할 수 있습니다."
     elif band_position <= 0.25:
         bollinger_score = 7
         bollinger_comment = "종가가 볼린저 밴드 하단 쪽에 가까워 반등 여지를 참고할 수 있습니다."
@@ -1177,7 +1209,7 @@ def calculate_signal(df):
             obv_comment = "최근 가격 상승에 비해 OBV가 따라오지 않아 상승 신뢰도가 제한됩니다."
         elif price_change_5 < 0 and obv_change_5 > 0:
             obv_score = max(obv_score, 7)
-            obv_comment = "최근 가격은 약했지만 OBV가 개선되어 누적 매수 흐름을 참고할 수 있습니다."
+            obv_comment = "최근 가격은 약했지만 OBV가 개선되어 누적 수급 개선을 참고할 수 있습니다."
     add_score("OBV", obv_score, obv_comment, 1.0)
 
     score_details = pd.DataFrame(score_rows)
@@ -1393,13 +1425,13 @@ def build_swing_score_breakdown(df):
         macd_comment = "MACD가 Signal 위에 있어 단기 모멘텀이 우호적입니다."
     elif previous["MACD"] <= previous["MACD_Signal"] and latest["MACD"] > latest["MACD_Signal"]:
         macd_score = 85
-        macd_comment = "MACD가 Signal을 상향 돌파해 단기 전환 신호를 참고할 수 있습니다."
+        macd_comment = "MACD가 Signal을 상향 돌파해 단기 전환 조건을 참고할 수 있습니다."
     elif latest["MACD"] < latest["MACD_Signal"] and latest["MACD_Histogram_Change"] < 0:
         macd_score = 30
         macd_comment = "MACD가 Signal 아래에 있고 Histogram도 약화되고 있습니다."
     elif previous["MACD"] >= previous["MACD_Signal"] and latest["MACD"] < latest["MACD_Signal"]:
         macd_score = 25
-        macd_comment = "MACD가 Signal을 하향 돌파해 단기 약화 신호를 참고해야 합니다."
+        macd_comment = "MACD가 Signal을 하향 이탈해 단기 약화 조건을 참고해야 합니다."
     add_score("MACD 스윙", macd_score, 0.15, macd_comment)
 
     volume_score = 50
@@ -1414,10 +1446,10 @@ def build_swing_score_breakdown(df):
             volume_comment = "평균 이상 거래량에서 가격이 비교적 우호적으로 움직였습니다."
         elif latest["Volume"] > previous["Volume"] and latest["Close"] < previous["Close"]:
             volume_score = 32
-            volume_comment = "거래량이 늘었지만 가격이 밀려 매도 압력 확인이 필요합니다."
+            volume_comment = "거래량이 늘었지만 가격이 밀려 하락 압력 확인이 필요합니다."
         elif volume_ratio < 0.7:
             volume_score = 45
-            volume_comment = "거래량이 낮아 스윙 신호 신뢰도가 제한될 수 있습니다."
+            volume_comment = "거래량이 낮아 스윙 조건 신뢰도가 제한될 수 있습니다."
     add_score("거래량 확인", volume_score, 0.10, volume_comment)
 
     band_position = (latest["Close"] - latest["Bollinger_Lower"]) / (latest["Bollinger_Upper"] - latest["Bollinger_Lower"]) if latest["Bollinger_Upper"] != latest["Bollinger_Lower"] else np.nan
@@ -1591,8 +1623,9 @@ def run_backtest(df, signal_history):
 
     for _, signal_row in signal_history.iterrows():
         signal = signal_row["보조 판단"]
+        technical_score = signal_row.get("기술적 점수", np.nan)
 
-        if signal not in ["매수 우세", "매수 우세 강함"]:
+        if not is_positive_attention_condition(technical_score):
             continue
 
         signal_date = signal_row["Date"]
@@ -1613,9 +1646,9 @@ def run_backtest(df, signal_history):
 
         rows.append(
             {
-                "신호 날짜": signal_date,
-                "신호": signal,
-                "진입 기준 종가": entry,
+                "조건 발생 날짜": signal_date,
+                "조건": signal,
+                "기준 종가": entry,
                 "5거래일 수익률": future_5 / entry - 1 if pd.notna(future_5) else np.nan,
                 "20거래일 수익률": future_20 / entry - 1 if pd.notna(future_20) else np.nan,
                 "20거래일 내 최대 하락률": max_drawdown,
@@ -1628,11 +1661,11 @@ def run_backtest(df, signal_history):
         return result, {}
 
     summary = {
-        "매수 우세 신호 발생 횟수": len(result),
+        "상승 관심 조건 발생 횟수": len(result),
         "5거래일 평균 수익률": result["5거래일 수익률"].mean(),
         "20거래일 평균 수익률": result["20거래일 수익률"].mean(),
-        "5거래일 승률": (result["5거래일 수익률"] > 0).mean(),
-        "20거래일 승률": (result["20거래일 수익률"] > 0).mean(),
+        "5거래일 양수 비율": (result["5거래일 수익률"] > 0).mean(),
+        "20거래일 양수 비율": (result["20거래일 수익률"] > 0).mean(),
         "평균 최대 하락률": result["20거래일 내 최대 하락률"].mean(),
     }
 
@@ -1757,30 +1790,30 @@ def create_price_chart(df, signal_history=None):
 
     if signal_history is not None and not signal_history.empty:
         history = signal_history.copy()
-        buy_signals = history[history["보조 판단"].isin(["매수 우세", "매수 우세 강함"])]
-        sell_signals = history[history["보조 판단"].isin(["매도 우세", "매도 우세 강함"])]
+        attention_signals = history[history["기술적 점수"].apply(is_positive_attention_condition)]
+        caution_signals = history[history["기술적 점수"].apply(is_negative_caution_condition)]
 
-        if not buy_signals.empty:
+        if not attention_signals.empty:
             fig.add_trace(
                 go.Scatter(
-                    x=buy_signals["Date"],
-                    y=buy_signals["Close"],
+                    x=attention_signals["Date"],
+                    y=attention_signals["Close"],
                     mode="markers",
-                    name="매수 우세 신호",
+                    name="상승 관심 조건",
                     marker=dict(symbol="triangle-up", size=10, color="#16a34a", line=dict(width=1, color="#ffffff")),
-                    hovertemplate="매수 우세<br>%{x}<br>종가 %{y:,.2f}<extra></extra>",
+                    hovertemplate="상승 관심 조건<br>%{x}<br>종가 %{y:,.2f}<extra></extra>",
                 )
             )
 
-        if not sell_signals.empty:
+        if not caution_signals.empty:
             fig.add_trace(
                 go.Scatter(
-                    x=sell_signals["Date"],
-                    y=sell_signals["Close"],
+                    x=caution_signals["Date"],
+                    y=caution_signals["Close"],
                     mode="markers",
-                    name="매도 우세 신호",
+                    name="약세 주의 조건",
                     marker=dict(symbol="triangle-down", size=10, color="#dc2626", line=dict(width=1, color="#ffffff")),
-                    hovertemplate="매도 우세<br>%{x}<br>종가 %{y:,.2f}<extra></extra>",
+                    hovertemplate="약세 주의 조건<br>%{x}<br>종가 %{y:,.2f}<extra></extra>",
                 )
             )
 
@@ -2233,6 +2266,58 @@ def render_metric_summary(latest, signal_result):
     )
 
 
+def get_data_quality_status(df):
+    if df is None or df.empty:
+        return "조회 실패", "가격 데이터가 비어 있습니다."
+
+    issues = []
+    required = ["Open", "High", "Low", "Close", "Volume"]
+
+    missing_columns = [column for column in required if column not in df.columns]
+    if missing_columns:
+        issues.append(f"필수 컬럼 누락: {', '.join(missing_columns)}")
+
+    if "Close" in df.columns and df["Close"].dropna().empty:
+        issues.append("종가 데이터 없음")
+
+    if df.index.has_duplicates:
+        issues.append("중복 날짜 존재")
+
+    if len(df) < 60:
+        issues.append("60일 지표 계산에는 데이터가 짧음")
+
+    if issues:
+        return "확인 필요", " / ".join(issues)
+
+    return "정상", "OHLCV 데이터가 정상적으로 정리되었습니다."
+
+
+def render_data_reference_box(df, ticker, period_option, show_intraday, intraday_interval):
+    valid_df = df.dropna(subset=["Close"]) if df is not None and "Close" in df.columns else pd.DataFrame()
+    quality_status, quality_comment = get_data_quality_status(df)
+    latest_date = valid_df.index[-1].date() if not valid_df.empty else "-"
+    first_date = valid_df.index[0].date() if not valid_df.empty else "-"
+    latest_volume = f"{int(valid_df['Volume'].iloc[-1]):,}" if not valid_df.empty and pd.notna(valid_df["Volume"].iloc[-1]) else "-"
+    intraday_note = f"{intraday_interval} 분봉 참고 사용" if show_intraday else "분봉 참고 꺼짐"
+
+    st.markdown(
+        f"""
+        <div class="basis-card">
+            <b>데이터 기준 안내</b><br>
+            <b>분석 코드:</b> {html.escape(str(ticker))}<br>
+            <b>데이터 출처:</b> yfinance 참고 데이터<br>
+            <b>일봉 분석 기간:</b> {html.escape(str(period_option))} · <b>분봉:</b> {html.escape(str(intraday_note))}<br>
+            <b>일봉 범위:</b> {first_date} ~ {latest_date}<br>
+            <b>가격 기준:</b> 일반 Close 기준(auto_adjust=False), OHLCV는 Open/High/Low/Close/Volume 기준<br>
+            <b>최근 거래량:</b> {latest_volume}<br>
+            <b>데이터 품질:</b> {html.escape(quality_status)} - {html.escape(quality_comment)}<br>
+            <b>주의:</b> yfinance 데이터는 실제 증권사/거래소 데이터와 차이가 있을 수 있고, 분봉 데이터는 지연되거나 일부 누락될 수 있습니다.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def format_direction(direction):
     if direction == "inverse":
         return "인버스"
@@ -2286,6 +2371,53 @@ def render_asset_profile(asset_meta):
             </div>
             """,
             unsafe_allow_html=True,
+        )
+
+
+def get_condition_category(item):
+    item_text = str(item)
+    if "이동평균" in item_text or "ADX" in item_text:
+        return "추세"
+    if "RSI" in item_text or "MACD" in item_text:
+        return "모멘텀"
+    if "거래량" in item_text or "OBV" in item_text:
+        return "거래량/수급"
+    if "ATR" in item_text or "볼린저" in item_text:
+        return "변동성/가격 위치"
+    return "기타"
+
+
+def render_condition_checklist(signal_result):
+    score_details = signal_result.get("score_details", pd.DataFrame())
+
+    st.subheader("기술적 조건 체크리스트")
+
+    if score_details.empty:
+        st.info("기술적 조건 체크리스트를 만들 수 있는 데이터가 부족합니다.")
+        return
+
+    checklist_df = score_details.copy()
+    checklist_df["범주"] = checklist_df["평가 항목"].apply(get_condition_category)
+    checklist_df["상태"] = checklist_df["점수"].apply(score_to_condition_state)
+    checklist_df["점수 구간"] = checklist_df["점수"].apply(score_to_condition_bucket)
+    checklist_df = checklist_df[["범주", "평가 항목", "상태", "점수", "점수 구간", "해석"]]
+
+    st.dataframe(checklist_df, use_container_width=True, hide_index=True)
+    st.caption("체크리스트는 조건 충족 여부를 빠르게 정리한 참고표이며, 단일 조건만으로 판단하지 않습니다.")
+
+
+def render_indicator_caution_notes():
+    with st.expander("지표 해석 주의사항", expanded=False):
+        st.markdown(
+            """
+            - RSI는 과열/침체 위치를 참고하는 지표이며, 강한 추세에서는 높은 값이나 낮은 값이 오래 이어질 수 있습니다.
+            - 이동평균선 교차는 흐름 변화를 늦게 보여줄 수 있어 거래량과 가격 위치를 함께 확인해야 합니다.
+            - MACD는 모멘텀 변화를 보지만 후행성이 있어 장중 급변에는 늦게 반응할 수 있습니다.
+            - 볼린저 밴드 상단권과 하단권은 가격 위치 참고이며 방향을 단정하지 않습니다.
+            - ADX는 추세 강도 지표이고 방향은 +DI, -DI, 가격 흐름과 함께 봐야 합니다.
+            - ATR은 방향이 아니라 흔들림의 크기를 보여주므로 위험 관리 참고로 해석합니다.
+            - 거래량 증가는 가격 상승과 함께 나올 때와 가격 하락과 함께 나올 때 의미가 다를 수 있습니다.
+            """
         )
 
 
@@ -2495,7 +2627,7 @@ def render_risk_reference_section(df, signal_result, asset_meta=None):
     st.markdown(
         """
         <div class="basis-card">
-            아래 정보는 매수·매도 지시가 아니라 최근 변동성과 가격 범위를 기준으로 한 참고 정보입니다.
+            아래 정보는 거래 지시가 아니라 최근 변동성과 가격 범위를 기준으로 한 참고 정보입니다.
         </div>
         """,
         unsafe_allow_html=True,
@@ -3321,6 +3453,7 @@ def render_usage_guide():
 
         ### 점수 해석법
         - 일봉 기술 점수는 이동평균, RSI, MACD, 거래량, 볼린저 밴드, ADX, ATR, OBV 조건을 종합한 참고 점수입니다.
+        - 일봉 점수 구간은 1-2점 강한 약세 주의, 3-4점 약세 주의, 5-6점 관망/확인 구간, 7-8점 상승 관심 조건, 9-10점 상승 관심 조건 강함으로 표시합니다.
         - 1개월 스윙 조건 충족도는 최근 약 20거래일 흐름을 기준으로 단기 조건 충족도를 확인하는 판단 보조 점수입니다.
         - 당일 흐름 점수는 yfinance 분봉 데이터를 기준으로 당일 가격, VWAP, 분봉 이동평균, 거래량 흐름을 참고합니다.
         - 점수가 높아도 이후 결과를 의미하지 않으며, 점수가 낮아도 단독 판단 근거로 사용하기 어렵습니다.
@@ -3335,6 +3468,7 @@ def render_usage_guide():
 
         ### 데이터 한계
         - yfinance 데이터는 실제 증권사 HTS/MTS 또는 거래소 공식 데이터와 차이가 있을 수 있습니다.
+        - 데이터 기준 안내 박스에서 최근 거래일, 가격 기준, 데이터 품질 상태를 먼저 확인하세요.
         - 분봉 데이터는 실시간 시세가 아니며 지연되거나 일부 누락될 수 있습니다.
         - OpenDART 공시는 한국 주식 참고 정보이며, ETF와 미국 자산은 DART 대상이 아닐 수 있습니다.
         - 공시와 뉴스는 기술적 점수에 직접 반영하지 않고 참고 정보로만 표시합니다.
@@ -3361,9 +3495,9 @@ def render_single_stock_analysis(
                 <h3>분석을 시작해보세요</h3>
                 <p>
                     왼쪽 사이드바에서 자산명 또는 코드와 분석 기간을 선택한 뒤 <b>분석 시작</b>을 누르면
-                    기술적 분석 점수, 1개월 스윙 점검, 보조 판단, 차트, 백테스트, 공시/뉴스 참고 정보를 확인할 수 있습니다.
-                    점수 해석은 1-2점 매도 우세 강함, 3-4점 매도 우세, 5-6점 관망 구간,
-                    7-8점 매수 우세, 9-10점 매수 우세 강함입니다.
+                    기술적 분석 점수, 1개월 스윙 점검, 보조 판단, 차트, 과거 조건 사례, 공시/뉴스 참고 정보를 확인할 수 있습니다.
+                    점수 해석은 1-2점 강한 약세 주의, 3-4점 약세 주의, 5-6점 관망/확인 구간,
+                    7-8점 상승 관심 조건, 9-10점 상승 관심 조건 강함입니다.
                 </p>
             </div>
             """,
@@ -3411,6 +3545,7 @@ def render_single_stock_analysis(
     st.subheader(f"{asset_meta.get('name', normalized_ticker)} 분석 요약")
     st.caption(f"입력값: {asset_ref['input']} · 분석 코드: {normalized_ticker}")
     render_asset_profile(asset_meta)
+    render_data_reference_box(analyzed_df, normalized_ticker, period_option, show_intraday, intraday_interval)
 
     summary_col, gauge_col = st.columns([2, 1])
     with summary_col:
@@ -3418,12 +3553,15 @@ def render_single_stock_analysis(
     with gauge_col:
         st.plotly_chart(create_score_gauge(signal_result["technical_score"]), use_container_width=True)
 
-    st.subheader("신호 판단 이유")
+    st.subheader("조건 판단 근거")
     for reason in signal_result["reasons"]:
         st.write(f"- {reason}")
 
-    st.subheader("평가 항목별 점수")
-    st.dataframe(signal_result["score_details"], use_container_width=True)
+    render_condition_checklist(signal_result)
+    render_indicator_caution_notes()
+
+    with st.expander("평가 항목별 원점수 보기", expanded=False):
+        st.dataframe(signal_result["score_details"], use_container_width=True)
 
     render_technical_score_breakdown(signal_result)
     render_swing_summary(swing_analyzed_df, swing_result)
@@ -3432,7 +3570,7 @@ def render_single_stock_analysis(
     signal_history = build_signal_history(analyzed_df)
 
     chart_tab, history_tab, backtest_tab, external_tab, data_tab = st.tabs(
-        ["기술적 차트", "신호 히스토리", "백테스트", "공시/뉴스 참고", "최근 데이터"]
+        ["기술적 차트", "조건 히스토리", "과거 조건 사례", "공시/뉴스 참고", "최근 데이터"]
     )
 
     with chart_tab:
@@ -3473,7 +3611,7 @@ def render_single_stock_analysis(
 
     with history_tab:
         if signal_history.empty:
-            st.info("신호 히스토리를 계산할 수 없습니다.")
+            st.info("조건 히스토리를 계산할 수 없습니다.")
         else:
             st.plotly_chart(create_signal_history_chart(signal_history), use_container_width=True)
             st.dataframe(signal_history.tail(30).sort_values("Date", ascending=False), use_container_width=True)
@@ -3482,17 +3620,17 @@ def render_single_stock_analysis(
         backtest_df, backtest_summary = run_backtest(analyzed_df, signal_history)
 
         if not backtest_summary:
-            st.info("백테스트에 사용할 매수 우세 신호가 충분하지 않습니다.")
+            st.info("과거 흐름 확인에 사용할 상승 관심 조건 발생 사례가 충분하지 않습니다.")
         else:
             col1, col2, col3 = st.columns(3)
-            col1.metric("매수 우세 신호 발생 횟수", f"{backtest_summary['매수 우세 신호 발생 횟수']:,}")
+            col1.metric("상승 관심 조건 발생 횟수", f"{backtest_summary['상승 관심 조건 발생 횟수']:,}")
             col1.metric("5거래일 평균 수익률", format_percent(backtest_summary["5거래일 평균 수익률"]))
             col2.metric("20거래일 평균 수익률", format_percent(backtest_summary["20거래일 평균 수익률"]))
-            col2.metric("5거래일 승률", format_percent(backtest_summary["5거래일 승률"]))
-            col3.metric("20거래일 승률", format_percent(backtest_summary["20거래일 승률"]))
+            col2.metric("5거래일 양수 비율", format_percent(backtest_summary["5거래일 양수 비율"]))
+            col3.metric("20거래일 양수 비율", format_percent(backtest_summary["20거래일 양수 비율"]))
             col3.metric("평균 최대 하락률", format_percent(backtest_summary["평균 최대 하락률"]))
-            st.dataframe(backtest_df.tail(50).sort_values("신호 날짜", ascending=False), use_container_width=True)
-            st.caption("백테스트는 과거 데이터 기반 검증이며 미래 성과를 보장하지 않습니다.")
+            st.dataframe(backtest_df.tail(50).sort_values("조건 발생 날짜", ascending=False), use_container_width=True)
+            st.caption("과거 조건 발생 사례는 과거 데이터 기반 참고이며 이후 성과를 의미하지 않습니다.")
 
     with external_tab:
         st.write("공시와 뉴스는 기술적 점수에 직접 반영하지 않고 참고 정보로만 표시합니다.")
@@ -3539,10 +3677,10 @@ def render_hero():
             <h1>이영록 스톡랩</h1>
             <p>
                 기술적 지표와 공개 정보를 함께 확인하는 판단 보조 도구입니다.
-                단일 자산 상세 분석, 1개월 스윙 점검, 관심자산 스캐너를 통해 점검 우선 자산과 참고 신호를 한 화면에서 정리합니다.
+                단일 자산 상세 분석, 1개월 스윙 점검, 관심자산 스캐너를 통해 점검 우선 자산과 참고 조건을 한 화면에서 정리합니다.
             </p>
             <div class="notice-row">
-                <div class="notice">본 프로그램은 실제 투자 조언이 아닌 기술적 분석 및 공개 정보 확인을 위한 개인용 판단 보조 도구입니다.</div>
+                <div class="notice">본 대시보드는 기술적 조건과 참고 정보를 정리하는 개인용 판단 보조 도구이며, 특정 자산의 거래 지시나 성과 보장을 목적으로 하지 않습니다.</div>
                 <div class="notice">yfinance 데이터는 실제 증권사/거래소 데이터와 차이가 있을 수 있으며, 분봉 데이터는 실시간 시세가 아니라 지연될 수 있습니다.</div>
             </div>
         </div>
@@ -3578,6 +3716,10 @@ def main():
         show_news = st.checkbox("뉴스 참고 영역 표시", value=True)
         auto_refresh = st.checkbox("30분마다 자동 새로고침", value=False)
         analyze = st.button("분석 시작", type="primary", use_container_width=True)
+        st.caption(
+            "주의: 이 앱은 기술적 조건, 데이터 기준, 공시/뉴스 참고 정보를 정리하는 개인용 판단 보조 도구입니다. "
+            "실제 거래 전에는 증권사/거래소 데이터와 별도 리스크를 함께 확인하세요."
+        )
 
     if auto_refresh:
         enable_auto_refresh(minutes=30)
