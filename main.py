@@ -37,7 +37,11 @@ SIGNAL_COLUMNS = [
     "Bollinger_Middle",
     "Bollinger_Upper",
     "Bollinger_Lower",
+    "Bollinger_Width",
+    "Bollinger_Percent_B",
     "ADX",
+    "Plus_DI",
+    "Minus_DI",
     "ATR",
     "ATR_Ratio",
     "OBV",
@@ -53,6 +57,7 @@ LEVERAGED_LONG_TICKERS = {
     "SOXL",
     "FAS",
     "TNA",
+    "SOXL",
     "122630.KS",
     "233740.KS",
     "204450.KS",
@@ -64,6 +69,7 @@ INVERSE_TICKERS = {
     "QID",
     "PSQ",
     "SH",
+    "SOXS",
     "252670.KS",
     "251340.KS",
     "114800.KS",
@@ -721,6 +727,9 @@ def calculate_indicators(df):
     bollinger_std = analyzed["Close"].rolling(window=20).std()
     analyzed["Bollinger_Upper"] = analyzed["Bollinger_Middle"] + (bollinger_std * 2)
     analyzed["Bollinger_Lower"] = analyzed["Bollinger_Middle"] - (bollinger_std * 2)
+    bollinger_range = (analyzed["Bollinger_Upper"] - analyzed["Bollinger_Lower"]).replace(0, np.nan)
+    analyzed["Bollinger_Width"] = bollinger_range / analyzed["Bollinger_Middle"].replace(0, np.nan)
+    analyzed["Bollinger_Percent_B"] = (analyzed["Close"] - analyzed["Bollinger_Lower"]) / bollinger_range
 
     high_low = analyzed["High"] - analyzed["Low"]
     high_close = (analyzed["High"] - analyzed["Close"].shift(1)).abs()
@@ -736,6 +745,8 @@ def calculate_indicators(df):
     plus_di = 100 * pd.Series(plus_dm, index=analyzed.index).rolling(window=14).mean() / analyzed["ATR"]
     minus_di = 100 * pd.Series(minus_dm, index=analyzed.index).rolling(window=14).mean() / analyzed["ATR"]
     dx = (100 * (plus_di - minus_di).abs() / (plus_di + minus_di)).replace([np.inf, -np.inf], np.nan)
+    analyzed["Plus_DI"] = plus_di.replace([np.inf, -np.inf], np.nan)
+    analyzed["Minus_DI"] = minus_di.replace([np.inf, -np.inf], np.nan)
     analyzed["ADX"] = dx.rolling(window=14).mean()
 
     direction = np.sign(analyzed["Close"].diff()).fillna(0)
@@ -767,28 +778,39 @@ def clamp_score_100(score):
     return int(max(0, min(100, round(score))))
 
 
+def classify_asset_type(ticker):
+    normalized_ticker = normalize_ticker(ticker)
+
+    if normalized_ticker in LEVERAGED_LONG_TICKERS:
+        return "레버리지 ETF"
+    if normalized_ticker in INVERSE_TICKERS:
+        return "인버스 레버리지 ETF" if normalized_ticker in {"SQQQ", "SPXU", "SDS", "QID", "SOXS", "252670.KS", "251340.KS"} else "인버스 ETF"
+    if normalized_ticker in COMMON_ETF_TICKERS:
+        return "일반 ETF"
+    if normalized_ticker.startswith("^"):
+        return "시장 지수"
+    if normalized_ticker.endswith(".KS") and get_stock_code(normalized_ticker):
+        return "한국 주식"
+    if normalized_ticker and "." not in normalized_ticker and not normalized_ticker.isdigit():
+        return "미국 주식"
+
+    return "분류 불명"
+
+
 def infer_asset_meta(ticker):
     normalized_ticker = normalize_ticker(ticker)
+    asset_type = classify_asset_type(normalized_ticker)
     risk_badges = []
-    asset_type = "개별 주식"
     direction = "long"
     leverage_factor = 1
 
-    if normalized_ticker in LEVERAGED_LONG_TICKERS:
-        asset_type = "레버리지 ETF"
+    if asset_type == "레버리지 ETF":
         leverage_factor = 2 if normalized_ticker.endswith(".KS") else 3
         risk_badges = ["구조적 위험 참고", "변동성 확대 주의", "장기 보유 적합성 별도 확인 필요", "기초지수 방향성 확인 필요"]
-    elif normalized_ticker in INVERSE_TICKERS:
-        asset_type = "인버스 레버리지 ETF" if normalized_ticker in {"SQQQ", "SPXU", "SDS", "QID", "252670.KS", "251340.KS"} else "인버스 ETF"
+    elif asset_type in ["인버스 ETF", "인버스 레버리지 ETF"]:
         direction = "inverse"
         leverage_factor = -2 if normalized_ticker.endswith(".KS") else -3 if normalized_ticker in {"SQQQ", "SPXU"} else -1
         risk_badges = ["구조적 위험 참고", "변동성 확대 주의", "장기 보유 적합성 별도 확인 필요", "기초지수 방향성 확인 필요"]
-    elif normalized_ticker in COMMON_ETF_TICKERS:
-        asset_type = "ETF"
-    elif normalized_ticker.startswith("^"):
-        asset_type = "시장 지수"
-    elif normalized_ticker.endswith(".KS") and get_stock_code(normalized_ticker) and normalized_ticker.split(".")[0].startswith(("0", "1", "2", "3", "4")):
-        asset_type = "개별 주식"
 
     return {
         "ticker": normalized_ticker,
@@ -1469,13 +1491,19 @@ def run_backtest(df, signal_history):
 def format_price(value):
     if pd.isna(value):
         return "-"
-    return f"{value:,.2f}"
+    try:
+        return f"{float(value):,.2f}"
+    except (TypeError, ValueError):
+        return "-"
 
 
 def format_percent(value):
     if pd.isna(value):
         return "-"
-    return f"{value * 100:,.2f}%"
+    try:
+        return f"{float(value) * 100:,.2f}%"
+    except (TypeError, ValueError):
+        return "-"
 
 
 def apply_chart_theme(fig):
@@ -1658,12 +1686,14 @@ def create_macd_chart(df):
 def create_trend_risk_chart(df):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df["ADX"], mode="lines", name="ADX"))
+    fig.add_trace(go.Scatter(x=df.index, y=df["Plus_DI"], mode="lines", name="+DI", line=dict(color="#16a34a", width=1.2)))
+    fig.add_trace(go.Scatter(x=df.index, y=df["Minus_DI"], mode="lines", name="-DI", line=dict(color="#dc2626", width=1.2)))
     fig.add_trace(go.Scatter(x=df.index, y=df["ATR_Ratio"] * 100, mode="lines", name="ATR 비율(%)", yaxis="y2"))
     fig.add_hline(y=25, line_dash="dash", annotation_text="ADX 기준선 25")
     fig.update_layout(
-        title="ADX / ATR 차트",
+        title="ADX / +DI / -DI / ATR 차트",
         xaxis_title="날짜",
-        yaxis=dict(title="ADX"),
+        yaxis=dict(title="ADX / DI"),
         yaxis2=dict(title="ATR 비율(%)", overlaying="y", side="right"),
         hovermode="x unified",
         height=420,
@@ -2042,8 +2072,265 @@ def render_metric_summary(latest, signal_result):
     st.markdown(
         f"""
         <div class="basis-card">
+            <b>데이터 출처:</b> yfinance<br>
+            <b>가격 기준:</b> 일반 Close 기준(auto_adjust=False)<br>
             <b>데이터 기준 날짜:</b> {latest.name.date()}<br>
             <b>변동성 리스크:</b> {signal_result['risk_level']} - {signal_result['risk_comment']}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def format_direction(direction):
+    if direction == "inverse":
+        return "인버스"
+    return "정방향"
+
+
+def render_asset_profile(asset_meta):
+    risk_badges = asset_meta.get("risk_badges", [])
+    risk_badge_html = " ".join(
+        f"<span class='signal-badge signal-neutral'>{html.escape(str(badge))}</span>" for badge in risk_badges
+    )
+    cards = [
+        ("자산 유형", asset_meta.get("asset_type", "분류 불명"), "입력 코드 기준"),
+        ("방향", format_direction(asset_meta.get("direction", "long")), "가격 흐름 해석 기준"),
+        ("배율", f"{asset_meta.get('leverage_factor', 1)}x", "상품 구조 참고"),
+        ("구조적 위험", risk_badge_html if risk_badges else "-", "레버리지/인버스 여부"),
+    ]
+
+    card_html = "<div class='metric-grid'>"
+    for label, value, sub in cards:
+        card_html += (
+            "<div class='metric-card'>"
+            f"<div class='label'>{label}</div>"
+            f"<div class='value'>{value}</div>"
+            f"<div class='sub'>{sub}</div>"
+            "</div>"
+        )
+    card_html += "</div>"
+    st.markdown(card_html, unsafe_allow_html=True)
+
+    if risk_badges:
+        st.markdown(
+            """
+            <div class="basis-card">
+                이 자산은 레버리지 또는 인버스 성격의 ETF로 분류됩니다.
+                일반 주식보다 변동성과 구조적 위험이 클 수 있으므로 기술적 점수는 단기 흐름 참고용으로만 해석해야 합니다.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def build_technical_score_summary(score_details):
+    if score_details is None or score_details.empty:
+        return {
+            "summary_df": pd.DataFrame(),
+            "overheat_note": "판단 불가",
+            "obv_note": "판단 불가",
+        }
+
+    category_map = {
+        "추세 점수": ["이동평균 배열", "이동평균 교차", "ADX 추세 강도"],
+        "모멘텀 점수": ["RSI", "MACD", "볼린저 밴드"],
+        "거래량 점수": ["거래량"],
+        "변동성 안정성 점수": ["ATR 변동성"],
+        "수급/OBV 참고": ["OBV"],
+    }
+    rows = []
+
+    for category, items in category_map.items():
+        subset = score_details[score_details["평가 항목"].isin(items)]
+
+        if subset.empty:
+            score = np.nan
+            comment = "해당 항목 데이터가 부족합니다."
+        else:
+            score = np.average(subset["점수"], weights=subset["가중치"])
+            comment = " / ".join(subset["해석"].astype(str).head(2).tolist())
+
+        rows.append(
+            {
+                "분류": category,
+                "점수": round(score, 2) if pd.notna(score) else np.nan,
+                "해석": comment,
+            }
+        )
+
+    rsi_row = score_details[score_details["평가 항목"] == "RSI"]
+    bollinger_row = score_details[score_details["평가 항목"] == "볼린저 밴드"]
+    obv_row = score_details[score_details["평가 항목"] == "OBV"]
+    overheat_note = "RSI/볼린저 기준 중립"
+    obv_note = "OBV 판단 불가"
+
+    if not rsi_row.empty:
+        overheat_note = str(rsi_row.iloc[0]["해석"])
+    if not bollinger_row.empty:
+        overheat_note += f" / {bollinger_row.iloc[0]['해석']}"
+    if not obv_row.empty:
+        obv_note = str(obv_row.iloc[0]["해석"])
+
+    return {
+        "summary_df": pd.DataFrame(rows),
+        "overheat_note": overheat_note,
+        "obv_note": obv_note,
+    }
+
+
+def render_technical_score_breakdown(signal_result):
+    st.subheader("기술 점수 근거 분해")
+    score_summary = build_technical_score_summary(signal_result.get("score_details", pd.DataFrame()))
+    summary_df = score_summary["summary_df"]
+
+    if summary_df.empty:
+        st.info("기술 점수 근거를 분해할 수 있는 데이터가 부족합니다.")
+        return
+
+    cards = [
+        ("종합 기술 점수", f"{signal_result['technical_score']} / 10", "기술적 조건 참고"),
+    ]
+    for _, row in summary_df.iterrows():
+        value = f"{row['점수']:.1f} / 10" if pd.notna(row["점수"]) else "-"
+        cards.append((row["분류"], value, "세부 항목 평균"))
+
+    card_html = "<div class='metric-grid'>"
+    for label, value, sub in cards:
+        card_html += (
+            "<div class='metric-card'>"
+            f"<div class='label'>{label}</div>"
+            f"<div class='value'>{value}</div>"
+            f"<div class='sub'>{sub}</div>"
+            "</div>"
+        )
+    card_html += "</div>"
+    st.markdown(card_html, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class="basis-card">
+            <b>과열/침체 참고:</b> {html.escape(score_summary['overheat_note'])}<br>
+            <b>수급/OBV 참고:</b> {html.escape(score_summary['obv_note'])}<br>
+            기술 점수 근거 분해는 점수가 나온 배경을 설명하기 위한 판단 보조 정보입니다.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+
+def get_bollinger_state(latest):
+    percent_b = latest.get("Bollinger_Percent_B", np.nan)
+    width = latest.get("Bollinger_Width", np.nan)
+
+    if pd.isna(percent_b):
+        position = "판단 불가"
+    elif percent_b >= 0.8:
+        position = "상단권"
+    elif percent_b <= 0.2:
+        position = "하단권"
+    else:
+        position = "중간권"
+
+    if pd.isna(width):
+        width_state = "판단 불가"
+    elif width >= 0.12:
+        width_state = "변동성 확대 참고"
+    elif width <= 0.04:
+        width_state = "변동성 축소 참고"
+    else:
+        width_state = "보통"
+
+    return position, width_state
+
+
+def get_di_state(latest):
+    adx = latest.get("ADX", np.nan)
+    plus_di = latest.get("Plus_DI", np.nan)
+    minus_di = latest.get("Minus_DI", np.nan)
+
+    if pd.isna(adx) or pd.isna(plus_di) or pd.isna(minus_di):
+        return "판단 불가"
+    if adx < 18:
+        return "뚜렷한 추세 약함"
+    if plus_di > minus_di:
+        return "상승 방향 추세 우세 참고"
+    if minus_di > plus_di:
+        return "하락 방향 추세 우세 참고"
+    return "방향성 중립"
+
+
+def calculate_risk_reference_levels(df, asset_meta=None):
+    analyzed = calculate_indicators(df) if not set(SIGNAL_COLUMNS).issubset(df.columns) else df.copy()
+    valid_df = analyzed.dropna(subset=["Close", "High", "Low", "ATR", "ATR_Ratio", "Bollinger_Width", "Bollinger_Percent_B", "ADX", "Plus_DI", "Minus_DI"])
+
+    if valid_df.empty:
+        return {}
+
+    latest = valid_df.iloc[-1]
+    recent_20 = analyzed.tail(20)
+    high_20 = recent_20["High"].max()
+    low_20 = recent_20["Low"].min()
+    bollinger_position, bollinger_width_state = get_bollinger_state(latest)
+
+    return {
+        "basis_date": latest.name.date(),
+        "latest_close": latest["Close"],
+        "atr": latest["ATR"],
+        "atr_ratio": latest["ATR_Ratio"],
+        "high_20": high_20,
+        "low_20": low_20,
+        "high_20_gap": latest["Close"] / high_20 - 1 if high_20 else np.nan,
+        "low_20_gap": latest["Close"] / low_20 - 1 if low_20 else np.nan,
+        "bollinger_width": latest["Bollinger_Width"],
+        "bollinger_percent_b": latest["Bollinger_Percent_B"],
+        "bollinger_position": bollinger_position,
+        "bollinger_width_state": bollinger_width_state,
+        "adx": latest["ADX"],
+        "plus_di": latest["Plus_DI"],
+        "minus_di": latest["Minus_DI"],
+        "di_state": get_di_state(latest),
+        "risk_badges": (asset_meta or {}).get("risk_badges", []),
+    }
+
+
+def render_risk_reference_section(df, signal_result, asset_meta=None):
+    st.subheader("리스크 참고")
+    risk_info = calculate_risk_reference_levels(df, asset_meta)
+
+    if not risk_info:
+        st.info("리스크 참고 정보를 계산할 데이터가 부족합니다.")
+        return
+
+    risk_badges = risk_info.get("risk_badges", [])
+    risk_badge_text = ", ".join(risk_badges) if risk_badges else "-"
+    cards = [
+        ("ATR 기반 변동성 참고", format_price(risk_info["atr"]), f"ATR 비율 {format_percent(risk_info['atr_ratio'])}"),
+        ("최근 20일 고점", format_price(risk_info["high_20"]), f"현재가 대비 {format_percent(risk_info['high_20_gap'])}"),
+        ("최근 20일 저점", format_price(risk_info["low_20"]), f"현재가 대비 {format_percent(risk_info['low_20_gap'])}"),
+        ("Bollinger Band Width", format_percent(risk_info["bollinger_width"]), risk_info["bollinger_width_state"]),
+        ("Bollinger %B", f"{risk_info['bollinger_percent_b']:.2f}", risk_info["bollinger_position"]),
+        ("ADX / +DI / -DI", f"{risk_info['adx']:.1f} / {risk_info['plus_di']:.1f} / {risk_info['minus_di']:.1f}", risk_info["di_state"]),
+        ("변동성 리스크 등급", signal_result["risk_level"], signal_result["risk_comment"]),
+        ("구조적 위험 참고", risk_badge_text, "상품 유형 기준"),
+    ]
+
+    card_html = "<div class='metric-grid'>"
+    for label, value, sub in cards:
+        card_html += (
+            "<div class='metric-card'>"
+            f"<div class='label'>{label}</div>"
+            f"<div class='value'>{value}</div>"
+            f"<div class='sub'>{html.escape(str(sub))}</div>"
+            "</div>"
+        )
+    card_html += "</div>"
+
+    st.markdown(card_html, unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="basis-card">
+            아래 정보는 매수·매도 지시가 아니라 최근 변동성과 가격 범위를 기준으로 한 참고 정보입니다.
         </div>
         """,
         unsafe_allow_html=True,
@@ -2222,6 +2509,9 @@ def get_volatility_score(risk_level):
 
 
 def get_dart_disclosure_status(ticker, api_key):
+    if classify_asset_type(ticker) != "한국 주식":
+        return "해당 없음", pd.DataFrame()
+
     stock_code = get_stock_code(ticker)
 
     if not stock_code:
@@ -2316,6 +2606,7 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
 
         row = {
             "종목 코드": normalized_ticker,
+            "자산 유형": asset_meta["asset_type"],
             "일봉 기술 점수": daily_result["technical_score"],
             "일봉 보조 판단": daily_result["signal"],
             "1개월 스윙 조건 충족도": swing_result.get("swing_score") if swing_result.get("swing_score") is not None else np.nan,
@@ -2340,6 +2631,7 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
     except Exception as error:
         return {
             "종목 코드": normalized_ticker,
+            "자산 유형": asset_meta["asset_type"],
             "일봉 기술 점수": np.nan,
             "일봉 보조 판단": "분석 실패",
             "1개월 스윙 조건 충족도": np.nan,
@@ -2376,6 +2668,7 @@ def render_watchlist_priority_cards(result_df):
             f"<div class='ticker'>{html.escape(str(row['종목 코드']))}</div>"
             f"<div class='score'>{row['종합 점검 점수']} / 10</div>"
             "<div class='meta'>"
+            f"자산: {html.escape(str(row.get('자산 유형', '-')))}<br>"
             f"일봉: {html.escape(str(row['일봉 보조 판단']))}<br>"
             f"스윙: {html.escape(str(row.get('스윙 참고 신호', '-')))}<br>"
             f"당일: {html.escape(str(row['당일 흐름 판단']))}<br>"
@@ -2463,6 +2756,7 @@ def render_watchlist_scanner(dart_api_key):
 
     display_columns = [
         "종목 코드",
+        "자산 유형",
         "일봉 기술 점수",
         "일봉 보조 판단",
         "1개월 스윙 조건 충족도",
@@ -2481,6 +2775,10 @@ def render_watchlist_scanner(dart_api_key):
         "점검 유형",
         "종합 점검 점수",
     ]
+    for column in display_columns:
+        if column not in display_df.columns:
+            display_df[column] = "-"
+
     for percent_column in ["1개월 수익률", "최근 5거래일 수익률"]:
         if percent_column in display_df.columns:
             display_df[percent_column] = display_df[percent_column].apply(format_percent)
@@ -2493,12 +2791,30 @@ def render_usage_guide():
     st.subheader("사용 안내")
     st.markdown(
         """
-        - 본 프로그램은 실제 투자 조언이 아닌 기술적 분석 및 공개 정보 확인을 위한 개인용 판단 보조 도구입니다.
-        - yfinance 데이터는 실제 증권사/거래소 데이터와 차이가 있을 수 있으며, 분봉 데이터는 실시간 시세가 아니라 지연될 수 있습니다.
+        ### 앱 목적
+        이 앱은 실제 투자 조언이 아니라 기술적 분석과 공개 정보를 한 화면에서 정리하는 개인용 판단 보조 도구입니다.
+
+        ### 점수 해석법
+        - 일봉 기술 점수는 이동평균, RSI, MACD, 거래량, 볼린저 밴드, ADX, ATR, OBV 조건을 종합한 참고 점수입니다.
+        - 1개월 스윙 조건 충족도는 최근 약 20거래일 흐름을 기준으로 단기 조건 충족도를 확인하는 판단 보조 점수입니다.
+        - 당일 흐름 점수는 yfinance 분봉 데이터를 기준으로 당일 가격, VWAP, 분봉 이동평균, 거래량 흐름을 참고합니다.
+        - 점수가 높아도 이후 결과를 의미하지 않으며, 점수가 낮아도 단독 판단 근거로 사용하기 어렵습니다.
+
+        ### 관심자산 스캐너
+        관심자산 스캐너의 분석 후보는 먼저 점검할 대상을 정리하는 기능이며 매매 판단을 대신하지 않습니다.
+        종합 점검 점수는 화면 정렬용 참고 점수입니다.
+
+        ### ETF/레버리지/인버스 ETF 주의사항
+        레버리지와 인버스 ETF는 일반 주식보다 변동성과 구조적 위험이 클 수 있습니다.
+        인버스 상품의 점수는 해당 상품 가격 기준이며, 기초지수 방향성과 반대로 움직일 수 있습니다.
+
+        ### 데이터 한계
+        - yfinance 데이터는 실제 증권사 HTS/MTS 또는 거래소 공식 데이터와 차이가 있을 수 있습니다.
+        - 분봉 데이터는 실시간 시세가 아니며 지연되거나 일부 누락될 수 있습니다.
+        - OpenDART 공시는 한국 주식 참고 정보이며, ETF와 미국 자산은 DART 대상이 아닐 수 있습니다.
         - 공시와 뉴스는 기술적 점수에 직접 반영하지 않고 참고 정보로만 표시합니다.
-        - 1개월 스윙 점검은 최근 약 20거래일 흐름을 기준으로 단기 조건 충족도를 확인하는 판단 보조 기능입니다.
-        - 관심자산 스캐너의 분석 후보는 먼저 점검할 대상을 정리하는 기능이며 매매 판단을 대신하지 않습니다.
-        - DART 공시는 한국 6자리 종목 코드에서만 조회되며, 미국 종목은 해당 없음으로 표시됩니다.
+
+        최종 판단과 책임은 사용자에게 있습니다.
         """
     )
 
@@ -2561,6 +2877,7 @@ def render_single_stock_analysis(
     swing_result = calculate_swing_score_100(swing_analyzed_df, asset_meta)
 
     st.subheader(f"{normalized_ticker} 분석 요약")
+    render_asset_profile(asset_meta)
 
     summary_col, gauge_col = st.columns([2, 1])
     with summary_col:
@@ -2575,7 +2892,9 @@ def render_single_stock_analysis(
     st.subheader("평가 항목별 점수")
     st.dataframe(signal_result["score_details"], use_container_width=True)
 
+    render_technical_score_breakdown(signal_result)
     render_swing_summary(swing_analyzed_df, swing_result)
+    render_risk_reference_section(analyzed_df, signal_result, asset_meta)
 
     signal_history = build_signal_history(analyzed_df)
 
@@ -2648,7 +2967,9 @@ def render_single_stock_analysis(
         if show_dart:
             stock_code = get_stock_code(normalized_ticker)
 
-            if not stock_code:
+            if asset_meta["asset_type"] != "한국 주식":
+                st.info("DART 공시는 한국 주식으로 분류된 6자리 종목 코드에서만 조회합니다.")
+            elif not stock_code:
                 st.info("DART 공시는 한국 6자리 종목 코드에서만 조회합니다.")
             else:
                 try:
