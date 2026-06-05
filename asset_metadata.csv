@@ -1,0 +1,65 @@
+ticker,name,aliases,asset_type,market,underlying_index,leverage_factor,direction,category,currency,risk_note
+005930.KS,삼성전자,삼성|samsung|samsung electronics,한국 주식,KOREA,-,1,long,반도체,KRW,-
+000660.KS,SK하이닉스,하이닉스|sk hynix|skhynix,한국 주식,KOREA,-,1,long,반도체,KRW,-
+035420.KS,네이버,NAVER|naver,한국 주식,KOREA,-,1,long,인터넷,KRW,-
+035720.KS,카카오,Kakao|kakao,한국 주식,KOREA,-,1,long,인터넷,KRW,-
+051910.KS,LG화학,엘지화학|lg chem|lgchem,한국 주식,KOREA,-,1,long,화학,KRW,-
+006400.KS,삼성SDI,삼성에스디아이|samsung sdi,한국 주식,KOREA,-,1,long,배터리,KRW,-
+373220.KS,LG에너지솔루션,LG엔솔|lg energy solution|lgensol,한국 주식,KOREA,-,1,long,배터리,KRW,-
+005380.KS,현대차,현대자동차|hyundai motor,한국 주식,KOREA,-,1,long,자동차,KRW,-
+000270.KS,기아,kia|kia motors,한국 주식,KOREA,-,1,long,자동차,KRW,-
+068270.KS,셀트리온,celltrion,한국 주식,KOREA,-,1,long,바이오,KRW,-
+207940.KS,삼성바이오로직스,삼바|samsung biologics,한국 주식,KOREA,-,1,long,바이오,KRW,-
+105560.KS,KB금융,kb금융|kb financial,한국 주식,KOREA,-,1,long,금융,KRW,-
+055550.KS,신한지주,신한금융|shinhan,한국 주식,KOREA,-,1,long,금융,KRW,-
+005490.KS,POSCO홀딩스,포스코홀딩스|포스코|posco,한국 주식,KOREA,-,1,long,철강,KRW,-
+012330.KS,현대모비스,hyundai mobis,한국 주식,KOREA,-,1,long,자동차부품,KRW,-
+066570.KS,LG전자,엘지전자|lg electronics,한국 주식,KOREA,-,1,long,전자,KRW,-
+069500.KS,KODEX 200,코덱스200|kodex200,일반 ETF,KOREA,KOSPI200,1,long,지수추종,KRW,-
+102110.KS,TIGER 200,타이거200|tiger200,일반 ETF,KOREA,KOSPI200,1,long,지수추종,KRW,-
+229200.KS,KODEX 코스닥150,코덱스코스닥150|kodex kosdaq150,일반 ETF,KOREA,KOSDAQ150,1,long,지수추종,KRW,-
+122630.KS,KODEX 레버리지,코덱스레버리지|kodex leverage,레버리지 ETF,KOREA,KOSPI200,2,long,지수추종,KRW,구조적 위험 참고
+233740.KS,KODEX 코스닥150레버리지,코덱스코스닥150레버리지|kodex kosdaq150 leverage,레버리지 ETF,KOREA,KOSDAQ150,2,long,지수추종,KRW,구조적 위험 참고
+114800.KS,KODEX 인버스,코덱스인버스|kodex inverse,인버스 ETF,KOREA,KOSPI200,-1,inverse,인버스,KRW,구조적 위험 참고
+252670.KS,KODEX 200선물인버스2X,코덱스인버스2x|곱버스|kodex inverse 2x,인버스 레버리지 ETF,KOREA,KOSPI200 Futures,-2,inverse,인버스,KRW,변동성 확대 주의
+251340.KS,KODEX 코스닥150선물인버스,코덱스코스닥인버스|kodex kosdaq inverse,인버스 ETF,KOREA,KOSDAQ150 Futures,-1,inverse,인버스,KRW,구조적 위험 참고
+AAPL,애플,Apple|apple|아이폰,미국 주식,US,-,1,long,빅테크,USD,-
+MSFT,마이크로소프트,Microsoft|microsoft|MS,미국 주식,US,-,1,long,빅테크,USD,-
+NVDA,엔비디아,NVIDIA|nvidia,미국 주식,US,-,1,long,반도체,USD,-
+TSLA,테슬라,Tesla|tesla,미국 주식,US,-,1,long,전기차,USD,-
+AMZN,아마존,Amazon|amazon,미국 주식,US,-,1,long,빅테크,USD,-
+GOOGL,알파벳,구글|Google|Alphabet,미국 주식,US,-,1,long,빅테크,USD,-
+META,메타,페이스북|facebook|Meta,미국 주식,US,-,1,long,빅테크,USD,-
+AMD,AMD,에이엠디|Advanced Micro Devices,미국 주식,US,-,1,long,반도체,USD,-
+NFLX,넷플릭스,Netflix|netflix,미국 주식,US,-,1,long,미디어,USD,-
+BRK-B,버크셔 해서웨이,버크셔|Berkshire Hathaway|berkshire,미국 주식,US,-,1,long,복합기업,USD,-
+SPY,SPDR S&P 500 ETF,스파이|S&P500 ETF|spdr s&p 500,일반 ETF,US,S&P500,1,long,지수추종,USD,-
+QQQ,Invesco QQQ,큐큐큐|나스닥100 ETF|nasdaq100 etf,일반 ETF,US,NASDAQ100,1,long,지수추종,USD,-
+DIA,SPDR Dow Jones ETF,다우 ETF|dow etf,일반 ETF,US,DOW,1,long,지수추종,USD,-
+IWM,iShares Russell 2000 ETF,러셀2000 ETF|russell2000 etf,일반 ETF,US,Russell2000,1,long,지수추종,USD,-
+VOO,Vanguard S&P 500 ETF,뱅가드 S&P500|vanguard s&p500,일반 ETF,US,S&P500,1,long,지수추종,USD,-
+IVV,iShares Core S&P 500 ETF,아이쉐어즈 S&P500|ishares s&p500,일반 ETF,US,S&P500,1,long,지수추종,USD,-
+VTI,Vanguard Total Stock Market ETF,미국전체시장 ETF|total stock market,일반 ETF,US,US Total Market,1,long,지수추종,USD,-
+XLK,Technology Select Sector SPDR,기술주 ETF|tech etf,일반 ETF,US,S&P500 Technology,1,long,섹터,USD,-
+XLF,Financial Select Sector SPDR,금융 ETF|financial etf,일반 ETF,US,S&P500 Financials,1,long,섹터,USD,-
+XLE,Energy Select Sector SPDR,에너지 ETF|energy etf,일반 ETF,US,S&P500 Energy,1,long,섹터,USD,-
+XLV,Health Care Select Sector SPDR,헬스케어 ETF|healthcare etf,일반 ETF,US,S&P500 Health Care,1,long,섹터,USD,-
+TLT,iShares 20+ Year Treasury Bond ETF,미국장기채 ETF|long treasury etf,일반 ETF,US,US Treasury 20Y,1,long,채권,USD,-
+GLD,SPDR Gold Shares,금 ETF|gold etf,일반 ETF,US,Gold,1,long,원자재,USD,-
+SLV,iShares Silver Trust,은 ETF|silver etf,일반 ETF,US,Silver,1,long,원자재,USD,-
+TQQQ,ProShares UltraPro QQQ,티큐|나스닥3배|nasdaq 3x,레버리지 ETF,US,NASDAQ100,3,long,레버리지,USD,구조적 위험 참고
+SQQQ,ProShares UltraPro Short QQQ,에스큐|나스닥인버스3배|nasdaq inverse 3x,인버스 레버리지 ETF,US,NASDAQ100,-3,inverse,인버스,USD,변동성 확대 주의
+SOXL,Direxion Daily Semiconductor Bull 3X,속슬|반도체3배|semiconductor 3x,레버리지 ETF,US,Semiconductor,3,long,레버리지,USD,구조적 위험 참고
+SOXS,Direxion Daily Semiconductor Bear 3X,속스|반도체인버스3배|semiconductor inverse 3x,인버스 레버리지 ETF,US,Semiconductor,-3,inverse,인버스,USD,변동성 확대 주의
+UPRO,ProShares UltraPro S&P500,S&P500 3배|sp500 3x,레버리지 ETF,US,S&P500,3,long,레버리지,USD,구조적 위험 참고
+SPXL,Direxion Daily S&P500 Bull 3X,S&P500 레버리지|spxl,레버리지 ETF,US,S&P500,3,long,레버리지,USD,구조적 위험 참고
+QLD,ProShares Ultra QQQ,나스닥2배|nasdaq 2x,레버리지 ETF,US,NASDAQ100,2,long,레버리지,USD,구조적 위험 참고
+QID,ProShares UltraShort QQQ,나스닥인버스2배|nasdaq inverse 2x,인버스 레버리지 ETF,US,NASDAQ100,-2,inverse,인버스,USD,변동성 확대 주의
+SH,ProShares Short S&P500,S&P500 인버스|sp500 inverse,인버스 ETF,US,S&P500,-1,inverse,인버스,USD,구조적 위험 참고
+PSQ,ProShares Short QQQ,나스닥 인버스|qqq inverse,인버스 ETF,US,NASDAQ100,-1,inverse,인버스,USD,구조적 위험 참고
+^GSPC,S&P 500 지수,S&P500|sp500|에스앤피500,시장 지수,US,S&P500,1,long,시장 지수,USD,-
+^IXIC,NASDAQ Composite 지수,나스닥|nasdaq|나스닥종합,시장 지수,US,NASDAQ Composite,1,long,시장 지수,USD,-
+^DJI,DOW 지수,다우|dow|dow jones,시장 지수,US,DOW,1,long,시장 지수,USD,-
+^KS11,KOSPI 지수,코스피|kospi,시장 지수,KOREA,KOSPI,1,long,시장 지수,KRW,-
+^KQ11,KOSDAQ 지수,코스닥|kosdaq,시장 지수,KOREA,KOSDAQ,1,long,시장 지수,KRW,-
+^VIX,VIX 변동성 지수,VIX|빅스|변동성지수,시장 지수,US,VIX,1,long,변동성,USD,-

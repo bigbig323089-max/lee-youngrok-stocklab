@@ -90,6 +90,20 @@ COMMON_ETF_TICKERS = {
     "GLD",
     "SLV",
 }
+ASSET_METADATA_COLUMNS = [
+    "ticker",
+    "name",
+    "aliases",
+    "asset_type",
+    "market",
+    "underlying_index",
+    "leverage_factor",
+    "direction",
+    "category",
+    "currency",
+    "risk_note",
+]
+ASSET_METADATA_PATH = Path(__file__).with_name("asset_metadata.csv")
 
 
 def normalize_ticker(ticker):
@@ -99,6 +113,124 @@ def normalize_ticker(ticker):
         return f"{ticker}.KS"
 
     return ticker
+
+
+def normalize_lookup_text(value):
+    normalized = str(value or "").strip().casefold()
+    for char in [" ", "\t", "\n", "-", "_", ".", "/", "·", "㈜", "(주)", "주식회사"]:
+        normalized = normalized.replace(char, "")
+    return normalized
+
+
+def split_aliases(value):
+    return [alias.strip() for alias in str(value or "").replace(",", "|").split("|") if alias.strip()]
+
+
+@st.cache_data(ttl=60 * 60, show_spinner=False)
+def load_asset_metadata():
+    if not ASSET_METADATA_PATH.exists():
+        return pd.DataFrame(columns=ASSET_METADATA_COLUMNS)
+
+    try:
+        metadata_df = pd.read_csv(ASSET_METADATA_PATH, dtype=str).fillna("")
+    except Exception:
+        return pd.DataFrame(columns=ASSET_METADATA_COLUMNS)
+
+    for column in ASSET_METADATA_COLUMNS:
+        if column not in metadata_df.columns:
+            metadata_df[column] = ""
+
+    metadata_df = metadata_df[ASSET_METADATA_COLUMNS].copy()
+    metadata_df["ticker"] = metadata_df["ticker"].apply(lambda value: normalize_ticker(str(value)) if str(value).strip() else "")
+
+    return metadata_df
+
+
+def metadata_row_to_dict(row):
+    if row is None:
+        return {}
+    return {column: str(row.get(column, "") or "").strip() for column in ASSET_METADATA_COLUMNS}
+
+
+def get_asset_metadata_by_ticker(ticker):
+    normalized_ticker = normalize_ticker(str(ticker or ""))
+    metadata_df = load_asset_metadata()
+
+    if metadata_df.empty or not normalized_ticker:
+        return {}
+
+    matches = metadata_df[metadata_df["ticker"].str.upper() == normalized_ticker.upper()]
+
+    if matches.empty:
+        return {}
+
+    return metadata_row_to_dict(matches.iloc[0])
+
+
+def find_asset_metadata(query):
+    raw_query = str(query or "").strip()
+
+    if not raw_query:
+        return {}
+
+    normalized_ticker = normalize_ticker(raw_query)
+    ticker_match = get_asset_metadata_by_ticker(normalized_ticker)
+
+    if ticker_match:
+        return ticker_match
+
+    query_key = normalize_lookup_text(raw_query)
+    metadata_df = load_asset_metadata()
+
+    if metadata_df.empty or not query_key:
+        return {}
+
+    for _, row in metadata_df.iterrows():
+        row_dict = metadata_row_to_dict(row)
+        candidates = [row_dict.get("ticker", ""), row_dict.get("name", "")]
+        candidates.extend(split_aliases(row_dict.get("aliases", "")))
+
+        if query_key in {normalize_lookup_text(candidate) for candidate in candidates if candidate}:
+            return row_dict
+
+    return {}
+
+
+def resolve_asset_input(value):
+    raw_value = str(value or "").strip()
+
+    if not raw_value:
+        return {
+            "input": "",
+            "ticker": "",
+            "name": "",
+            "matched": False,
+            "metadata": {},
+        }
+
+    metadata = find_asset_metadata(raw_value)
+
+    if metadata:
+        ticker = normalize_ticker(metadata.get("ticker", raw_value))
+        name = metadata.get("name") or ticker
+        return {
+            "input": raw_value,
+            "ticker": ticker,
+            "name": name,
+            "matched": True,
+            "metadata": metadata,
+        }
+
+    ticker = normalize_ticker(raw_value)
+    ticker_metadata = get_asset_metadata_by_ticker(ticker)
+
+    return {
+        "input": raw_value,
+        "ticker": ticker,
+        "name": ticker_metadata.get("name") or ticker,
+        "matched": bool(ticker_metadata),
+        "metadata": ticker_metadata,
+    }
 
 
 def enable_auto_refresh(minutes=30):
@@ -780,6 +912,10 @@ def clamp_score_100(score):
 
 def classify_asset_type(ticker):
     normalized_ticker = normalize_ticker(ticker)
+    metadata = get_asset_metadata_by_ticker(normalized_ticker)
+
+    if metadata.get("asset_type"):
+        return metadata["asset_type"]
 
     if normalized_ticker in LEVERAGED_LONG_TICKERS:
         return "레버리지 ETF"
@@ -799,22 +935,37 @@ def classify_asset_type(ticker):
 
 def infer_asset_meta(ticker):
     normalized_ticker = normalize_ticker(ticker)
-    asset_type = classify_asset_type(normalized_ticker)
+    metadata = get_asset_metadata_by_ticker(normalized_ticker)
+    asset_type = metadata.get("asset_type") or classify_asset_type(normalized_ticker)
     risk_badges = []
-    direction = "long"
+    direction = metadata.get("direction") or "long"
     leverage_factor = 1
 
+    try:
+        if metadata.get("leverage_factor"):
+            leverage_factor = float(metadata["leverage_factor"])
+    except ValueError:
+        leverage_factor = 1
+
     if asset_type == "레버리지 ETF":
-        leverage_factor = 2 if normalized_ticker.endswith(".KS") else 3
+        leverage_factor = leverage_factor if leverage_factor != 1 else 2 if normalized_ticker.endswith(".KS") else 3
         risk_badges = ["구조적 위험 참고", "변동성 확대 주의", "장기 보유 적합성 별도 확인 필요", "기초지수 방향성 확인 필요"]
     elif asset_type in ["인버스 ETF", "인버스 레버리지 ETF"]:
         direction = "inverse"
-        leverage_factor = -2 if normalized_ticker.endswith(".KS") else -3 if normalized_ticker in {"SQQQ", "SPXU"} else -1
+        leverage_factor = leverage_factor if leverage_factor != 1 else -2 if normalized_ticker.endswith(".KS") else -3 if normalized_ticker in {"SQQQ", "SPXU"} else -1
         risk_badges = ["구조적 위험 참고", "변동성 확대 주의", "장기 보유 적합성 별도 확인 필요", "기초지수 방향성 확인 필요"]
+
+    if metadata.get("risk_note") and metadata["risk_note"] not in risk_badges and metadata["risk_note"] != "-":
+        risk_badges.append(metadata["risk_note"])
 
     return {
         "ticker": normalized_ticker,
+        "name": metadata.get("name") or normalized_ticker,
         "asset_type": asset_type,
+        "market": metadata.get("market") or "-",
+        "underlying_index": metadata.get("underlying_index") or "-",
+        "category": metadata.get("category") or "-",
+        "currency": metadata.get("currency") or "-",
         "direction": direction,
         "leverage_factor": leverage_factor,
         "risk_badges": risk_badges,
@@ -2088,15 +2239,29 @@ def format_direction(direction):
     return "정방향"
 
 
+def format_leverage_factor(value):
+    try:
+        factor = float(value)
+    except (TypeError, ValueError):
+        factor = 1
+
+    if factor.is_integer():
+        factor = int(factor)
+
+    return f"{factor}x"
+
+
 def render_asset_profile(asset_meta):
     risk_badges = asset_meta.get("risk_badges", [])
     risk_badge_html = " ".join(
         f"<span class='signal-badge signal-neutral'>{html.escape(str(badge))}</span>" for badge in risk_badges
     )
     cards = [
-        ("자산 유형", asset_meta.get("asset_type", "분류 불명"), "입력 코드 기준"),
+        ("자산명", asset_meta.get("name", asset_meta.get("ticker", "-")), "메타데이터 기준"),
+        ("분석 코드", asset_meta.get("ticker", "-"), "yfinance 조회 코드"),
+        ("자산 유형", asset_meta.get("asset_type", "분류 불명"), "분류 기준"),
         ("방향", format_direction(asset_meta.get("direction", "long")), "가격 흐름 해석 기준"),
-        ("배율", f"{asset_meta.get('leverage_factor', 1)}x", "상품 구조 참고"),
+        ("배율", format_leverage_factor(asset_meta.get("leverage_factor", 1)), "상품 구조 참고"),
         ("구조적 위험", risk_badge_html if risk_badges else "-", "레버리지/인버스 여부"),
     ]
 
@@ -2456,19 +2621,20 @@ def render_swing_summary(df, result):
 
 def parse_watchlist_input(text, max_count=WATCHLIST_MAX_COUNT):
     raw_items = text.replace(",", "\n").splitlines()
-    tickers = []
+    assets = []
     seen = set()
 
     for item in raw_items:
-        ticker = normalize_ticker(item.strip())
+        asset_ref = resolve_asset_input(item.strip())
+        ticker = asset_ref["ticker"]
 
         if not ticker or ticker in seen:
             continue
 
-        tickers.append(ticker)
+        assets.append(asset_ref)
         seen.add(ticker)
 
-    return tickers[:max_count], max(0, len(tickers) - max_count)
+    return assets[:max_count], max(0, len(assets) - max_count)
 
 
 def get_macd_status(latest):
@@ -2572,8 +2738,11 @@ def classify_watchlist_candidate(row):
 
 
 def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_key):
-    normalized_ticker = normalize_ticker(ticker)
+    asset_ref = ticker if isinstance(ticker, dict) else resolve_asset_input(ticker)
+    normalized_ticker = asset_ref["ticker"]
     asset_meta = infer_asset_meta(normalized_ticker)
+    if asset_ref.get("name"):
+        asset_meta["name"] = asset_ref["name"]
 
     try:
         daily_df = get_daily_data(normalized_ticker, daily_period)
@@ -2605,7 +2774,8 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
         score_latest["_volume_score"] = volume_score
 
         row = {
-            "종목 코드": normalized_ticker,
+            "자산명": asset_meta.get("name", normalized_ticker),
+            "분석 코드": normalized_ticker,
             "자산 유형": asset_meta["asset_type"],
             "일봉 기술 점수": daily_result["technical_score"],
             "일봉 보조 판단": daily_result["signal"],
@@ -2630,7 +2800,8 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
         return row
     except Exception as error:
         return {
-            "종목 코드": normalized_ticker,
+            "자산명": asset_meta.get("name", normalized_ticker),
+            "분석 코드": normalized_ticker,
             "자산 유형": asset_meta["asset_type"],
             "일봉 기술 점수": np.nan,
             "일봉 보조 판단": "분석 실패",
@@ -2663,11 +2834,14 @@ def render_watchlist_priority_cards(result_df):
     card_html = "<div class='candidate-grid'>"
 
     for _, row in valid_df.iterrows():
+        asset_name = str(row.get("자산명", row.get("분석 코드", row.get("종목 코드", "-"))))
+        analysis_code = str(row.get("분석 코드", row.get("종목 코드", "-")))
         card_html += (
             "<div class='candidate-card'>"
-            f"<div class='ticker'>{html.escape(str(row['종목 코드']))}</div>"
+            f"<div class='ticker'>{html.escape(asset_name)}</div>"
             f"<div class='score'>{row['종합 점검 점수']} / 10</div>"
             "<div class='meta'>"
+            f"코드: {html.escape(analysis_code)}<br>"
             f"자산: {html.escape(str(row.get('자산 유형', '-')))}<br>"
             f"일봉: {html.escape(str(row['일봉 보조 판단']))}<br>"
             f"스윙: {html.escape(str(row.get('스윙 참고 신호', '-')))}<br>"
@@ -2686,12 +2860,12 @@ def render_watchlist_scanner(dart_api_key):
     st.write("여러 자산을 한 번에 점검해 오늘 먼저 살펴볼 분석 후보를 정리합니다.")
     st.caption("이 영역은 투자 판단을 대신하지 않으며, 기술적 조건과 공개 정보 확인을 위한 판단 보조 화면입니다.")
 
-    default_watchlist = "005930.KS, 000660.KS, AAPL, MSFT, SPY, TQQQ, SQQQ"
+    default_watchlist = "삼성전자, SK하이닉스, 애플, 마이크로소프트, SPY, TQQQ, SQQQ"
     watchlist_text = st.text_area(
-        "관심자산 코드를 입력하세요",
+        "관심자산명 또는 코드를 입력하세요",
         value=default_watchlist,
         height=120,
-        help="쉼표 또는 줄바꿈으로 구분하세요. 6자리 한국 종목 코드는 자동으로 .KS가 붙습니다.",
+        help="쉼표 또는 줄바꿈으로 구분하세요. 예: 삼성전자, 005930, 애플, AAPL, SPY",
     )
 
     scanner_col1, scanner_col2 = st.columns([1, 1])
@@ -2704,10 +2878,10 @@ def render_watchlist_scanner(dart_api_key):
     analyze_watchlist = st.button("관심자산 분석 후보 찾기", type="primary")
 
     if analyze_watchlist:
-        tickers, overflow_count = parse_watchlist_input(watchlist_text)
+        assets, overflow_count = parse_watchlist_input(watchlist_text)
 
-        if not tickers:
-            st.warning("분석할 관심자산 코드를 입력하세요.")
+        if not assets:
+            st.warning("분석할 관심자산명 또는 코드를 입력하세요.")
         else:
             if overflow_count > 0:
                 st.info(f"최대 {WATCHLIST_MAX_COUNT}개까지만 분석합니다. 초과 입력된 {overflow_count}개 종목은 이번 분석에서 제외했습니다.")
@@ -2715,9 +2889,9 @@ def render_watchlist_scanner(dart_api_key):
             rows = []
             progress = st.progress(0, text="관심자산을 분석하는 중입니다...")
 
-            for index, ticker in enumerate(tickers, start=1):
-                rows.append(analyze_watchlist_ticker(ticker, period_map[scanner_period_option], scanner_interval, dart_api_key))
-                progress.progress(index / len(tickers), text=f"{ticker} 분석 중 ({index}/{len(tickers)})")
+            for index, asset_ref in enumerate(assets, start=1):
+                rows.append(analyze_watchlist_ticker(asset_ref, period_map[scanner_period_option], scanner_interval, dart_api_key))
+                progress.progress(index / len(assets), text=f"{asset_ref['name']} 분석 중 ({index}/{len(assets)})")
 
             progress.empty()
             result_df = pd.DataFrame(rows)
@@ -2755,7 +2929,8 @@ def render_watchlist_scanner(dart_api_key):
         display_df = display_df[display_df["점검 유형"] == selected_filter]
 
     display_columns = [
-        "종목 코드",
+        "자산명",
+        "분석 코드",
         "자산 유형",
         "일봉 기술 점수",
         "일봉 보조 판단",
@@ -3185,7 +3360,7 @@ def render_single_stock_analysis(
             <div class="empty-guide">
                 <h3>분석을 시작해보세요</h3>
                 <p>
-                    왼쪽 사이드바에서 자산 코드와 분석 기간을 선택한 뒤 <b>분석 시작</b>을 누르면
+                    왼쪽 사이드바에서 자산명 또는 코드와 분석 기간을 선택한 뒤 <b>분석 시작</b>을 누르면
                     기술적 분석 점수, 1개월 스윙 점검, 보조 판단, 차트, 백테스트, 공시/뉴스 참고 정보를 확인할 수 있습니다.
                     점수 해석은 1-2점 매도 우세 강함, 3-4점 매도 우세, 5-6점 관망 구간,
                     7-8점 매수 우세, 9-10점 매수 우세 강함입니다.
@@ -3197,16 +3372,21 @@ def render_single_stock_analysis(
         return
 
     if not ticker.strip():
-        st.error("자산 코드를 입력하세요.")
+        st.error("자산명 또는 코드를 입력하세요.")
         return
 
-    normalized_ticker = normalize_ticker(ticker)
+    asset_ref = resolve_asset_input(ticker)
+    normalized_ticker = asset_ref["ticker"]
+
+    if not normalized_ticker:
+        st.error("자산명 또는 코드를 입력하세요.")
+        return
 
     with st.spinner("일봉 데이터를 가져오고 기술적 지표를 계산하는 중입니다..."):
         daily_df = get_daily_data(normalized_ticker, period_map[period_option])
 
     if daily_df.empty:
-        st.error("주가 데이터를 가져오지 못했습니다. 자산 코드나 데이터 제공 상태를 확인하세요.")
+        st.error("주가 데이터를 가져오지 못했습니다. 자산명, 코드, 데이터 제공 상태를 확인하세요.")
         return
 
     if len(daily_df) < 60:
@@ -3223,10 +3403,13 @@ def render_single_stock_analysis(
     signal_result = calculate_signal(analyzed_df)
     latest = valid_df.iloc[-1]
     asset_meta = infer_asset_meta(normalized_ticker)
+    if asset_ref.get("name"):
+        asset_meta["name"] = asset_ref["name"]
     swing_analyzed_df = calculate_swing_indicators(analyzed_df)
     swing_result = calculate_swing_score_100(swing_analyzed_df, asset_meta)
 
-    st.subheader(f"{normalized_ticker} 분석 요약")
+    st.subheader(f"{asset_meta.get('name', normalized_ticker)} 분석 요약")
+    st.caption(f"입력값: {asset_ref['input']} · 분석 코드: {normalized_ticker}")
     render_asset_profile(asset_meta)
 
     summary_col, gauge_col = st.columns([2, 1])
@@ -3381,7 +3564,7 @@ def main():
 
     with st.sidebar:
         st.header("분석 설정")
-        ticker = st.text_input("자산 코드를 입력하세요", value="005930.KS", help="예: 005930.KS, 005930, AAPL, MSFT, SPY, TQQQ, SQQQ")
+        ticker = st.text_input("자산명 또는 코드를 입력하세요", value="삼성전자", help="예: 삼성전자, 005930, 애플, AAPL, SPY, TQQQ, SQQQ")
         period_option = st.selectbox("일봉 분석 기간", ["3개월", "6개월", "1년", "2년", "5년"], index=2)
         show_intraday = st.checkbox("분봉 참고 차트 표시", value=True)
         intraday_interval = st.selectbox("분봉 간격", ["1m", "5m", "15m", "30m", "60m"], index=1)
