@@ -44,6 +44,46 @@ SIGNAL_COLUMNS = [
     "OBV_MA20",
 ]
 WATCHLIST_MAX_COUNT = 20
+LEVERAGED_LONG_TICKERS = {
+    "TQQQ",
+    "UPRO",
+    "SPXL",
+    "QLD",
+    "SSO",
+    "SOXL",
+    "FAS",
+    "TNA",
+    "122630.KS",
+    "233740.KS",
+    "204450.KS",
+}
+INVERSE_TICKERS = {
+    "SQQQ",
+    "SPXU",
+    "SDS",
+    "QID",
+    "PSQ",
+    "SH",
+    "252670.KS",
+    "251340.KS",
+    "114800.KS",
+}
+COMMON_ETF_TICKERS = {
+    "SPY",
+    "QQQ",
+    "DIA",
+    "IWM",
+    "VOO",
+    "IVV",
+    "VTI",
+    "XLF",
+    "XLK",
+    "XLE",
+    "XLV",
+    "TLT",
+    "GLD",
+    "SLV",
+}
 
 
 def normalize_ticker(ticker):
@@ -721,6 +761,44 @@ def clamp_score(score):
     return int(max(1, min(10, round(score))))
 
 
+def clamp_score_100(score):
+    if pd.isna(score):
+        return 50
+    return int(max(0, min(100, round(score))))
+
+
+def infer_asset_meta(ticker):
+    normalized_ticker = normalize_ticker(ticker)
+    risk_badges = []
+    asset_type = "개별 주식"
+    direction = "long"
+    leverage_factor = 1
+
+    if normalized_ticker in LEVERAGED_LONG_TICKERS:
+        asset_type = "레버리지 ETF"
+        leverage_factor = 2 if normalized_ticker.endswith(".KS") else 3
+        risk_badges = ["구조적 위험 참고", "변동성 확대 주의", "장기 보유 적합성 별도 확인 필요", "기초지수 방향성 확인 필요"]
+    elif normalized_ticker in INVERSE_TICKERS:
+        asset_type = "인버스 레버리지 ETF" if normalized_ticker in {"SQQQ", "SPXU", "SDS", "QID", "252670.KS", "251340.KS"} else "인버스 ETF"
+        direction = "inverse"
+        leverage_factor = -2 if normalized_ticker.endswith(".KS") else -3 if normalized_ticker in {"SQQQ", "SPXU"} else -1
+        risk_badges = ["구조적 위험 참고", "변동성 확대 주의", "장기 보유 적합성 별도 확인 필요", "기초지수 방향성 확인 필요"]
+    elif normalized_ticker in COMMON_ETF_TICKERS:
+        asset_type = "ETF"
+    elif normalized_ticker.startswith("^"):
+        asset_type = "시장 지수"
+    elif normalized_ticker.endswith(".KS") and get_stock_code(normalized_ticker) and normalized_ticker.split(".")[0].startswith(("0", "1", "2", "3", "4")):
+        asset_type = "개별 주식"
+
+    return {
+        "ticker": normalized_ticker,
+        "asset_type": asset_type,
+        "direction": direction,
+        "leverage_factor": leverage_factor,
+        "risk_badges": risk_badges,
+    }
+
+
 def get_risk_level(latest):
     atr_ratio = latest["ATR_Ratio"]
 
@@ -737,6 +815,16 @@ def get_signal_badge_class(score):
     if score <= 4:
         return "signal-bad"
     if score <= 6:
+        return "signal-neutral"
+    return "signal-good"
+
+
+def get_signal_badge_class_100(score):
+    if score is None or pd.isna(score):
+        return "signal-neutral"
+    if score <= 39:
+        return "signal-bad"
+    if score <= 60:
         return "signal-neutral"
     return "signal-good"
 
@@ -932,6 +1020,370 @@ def calculate_signal(df):
         "reasons": reasons,
         "score_details": score_details,
     }
+
+
+def calculate_swing_indicators(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    base_columns_ready = set(SIGNAL_COLUMNS).issubset(df.columns)
+    analyzed = df.copy() if base_columns_ready else calculate_indicators(df)
+
+    analyzed["MA10"] = analyzed["Close"].rolling(window=10).mean()
+    analyzed["High_20"] = analyzed["High"].rolling(window=20).max()
+    analyzed["Low_20"] = analyzed["Low"].rolling(window=20).min()
+    analyzed["Return_20D"] = analyzed["Close"] / analyzed["Close"].shift(20) - 1
+    analyzed["Return_5D"] = analyzed["Close"] / analyzed["Close"].shift(5) - 1
+    analyzed["MA5_Slope"] = analyzed["MA5"] - analyzed["MA5"].shift(3)
+    analyzed["MA10_Slope"] = analyzed["MA10"] - analyzed["MA10"].shift(3)
+    analyzed["MACD_Histogram_Change"] = analyzed["MACD_Histogram"] - analyzed["MACD_Histogram"].shift(1)
+    analyzed["Swing_Range_Position"] = (analyzed["Close"] - analyzed["Low_20"]) / (analyzed["High_20"] - analyzed["Low_20"]).replace(0, np.nan)
+    analyzed["High_20_Gap"] = analyzed["Close"] / analyzed["High_20"] - 1
+    analyzed["Low_20_Gap"] = analyzed["Close"] / analyzed["Low_20"] - 1
+
+    return analyzed
+
+
+def score_to_swing_signal_100(score, asset_type="stock"):
+    if score is None or pd.isna(score):
+        return "분석 불가"
+
+    if asset_type in ["ETF", "국내 ETF", "미국 ETF", "시장 지수", "레버리지 ETF", "인버스 ETF", "인버스 레버리지 ETF"]:
+        if score <= 19:
+            return "단기 약세 흐름 강함"
+        if score <= 39:
+            return "단기 약세 흐름"
+        if score <= 60:
+            return "관망/확인 구간"
+        if score <= 80:
+            return "단기 우세 흐름"
+        return "단기 우세 흐름 강함"
+
+    if score <= 19:
+        return "단기 약세 흐름 강함"
+    if score <= 39:
+        return "단기 약세 흐름"
+    if score <= 60:
+        return "관망/확인 구간"
+    if score <= 80:
+        return "단기 우세 흐름"
+    return "단기 우세 흐름 강함"
+
+
+def _get_swing_ready_df(df):
+    analyzed = calculate_swing_indicators(df)
+    required_columns = [
+        "Close",
+        "Volume",
+        "MA5",
+        "MA10",
+        "MA20",
+        "Volume_MA20",
+        "RSI",
+        "MACD",
+        "MACD_Signal",
+        "MACD_Histogram",
+        "Bollinger_Middle",
+        "Bollinger_Upper",
+        "Bollinger_Lower",
+        "ADX",
+        "ATR_Ratio",
+        "OBV",
+        "OBV_MA20",
+        "High_20",
+        "Low_20",
+        "Return_20D",
+        "Return_5D",
+        "Swing_Range_Position",
+    ]
+
+    if analyzed.empty:
+        return analyzed, pd.DataFrame()
+
+    available_columns = [column for column in required_columns if column in analyzed.columns]
+    valid_df = analyzed.dropna(subset=available_columns)
+
+    return analyzed, valid_df
+
+
+def build_swing_score_breakdown(df):
+    analyzed, valid_df = _get_swing_ready_df(df)
+
+    if len(valid_df) < 2:
+        return pd.DataFrame(
+            [
+                {
+                    "평가 항목": "데이터 상태",
+                    "점수": 50,
+                    "가중치": 1.0,
+                    "해석": "1개월 스윙 점검에 필요한 데이터가 부족해 중립값으로 처리했습니다.",
+                }
+            ]
+        )
+
+    latest = valid_df.iloc[-1]
+    previous = valid_df.iloc[-2]
+    recent = valid_df.tail(5)
+    rows = []
+
+    def add_score(item, score, weight, comment):
+        rows.append(
+            {
+                "평가 항목": item,
+                "점수": clamp_score_100(score),
+                "가중치": weight,
+                "해석": comment,
+            }
+        )
+
+    trend_score = 50
+    trend_comment = "단기 이동평균 흐름이 중립에 가깝습니다."
+    if latest["Close"] > latest["MA5"] > latest["MA10"] > latest["MA20"] and latest["MA5_Slope"] > 0:
+        trend_score = 85
+        trend_comment = "종가가 MA5/MA10/MA20 위에 있고 단기 평균선 기울기도 우호적입니다."
+    elif latest["Close"] > latest["MA10"] and latest["MA5"] >= latest["MA10"] >= latest["MA20"]:
+        trend_score = 75
+        trend_comment = "단기 이동평균 배열이 우세 흐름에 가깝습니다."
+    elif latest["Close"] < latest["MA5"] < latest["MA10"] < latest["MA20"]:
+        trend_score = 25
+        trend_comment = "종가와 단기 이동평균 배열이 약세 쪽으로 기울어 있습니다."
+    elif latest["Close"] < latest["MA10"] and latest["MA5"] <= latest["MA10"]:
+        trend_score = 38
+        trend_comment = "최근 종가가 단기 평균선 아래에 있어 확인이 필요합니다."
+    add_score("1개월 추세", trend_score, 0.20, trend_comment)
+
+    range_position = latest["Swing_Range_Position"]
+    position_score = 50
+    position_comment = "종가가 최근 20일 변동 범위 중간권에 있습니다."
+    if pd.notna(range_position):
+        if range_position >= 0.95:
+            position_score = 58
+            position_comment = "종가가 20일 고점권에 가까워 우세 흐름과 과열 가능성을 함께 봐야 합니다."
+        elif range_position >= 0.70:
+            position_score = 75
+            position_comment = "종가가 20일 변동 범위 상단권에 있어 단기 흐름이 우호적입니다."
+        elif range_position <= 0.10:
+            position_score = 35
+            position_comment = "종가가 20일 저점권에 가까워 약세 흐름 또는 눌림 여부 확인이 필요합니다."
+        elif range_position <= 0.30:
+            position_score = 45
+            position_comment = "종가가 20일 변동 범위 하단권에 있어 반등 여부 확인이 필요합니다."
+    add_score("20일 고저점 위치", position_score, 0.10, position_comment)
+
+    momentum_score = 50
+    momentum_comment = "최근 5거래일 모멘텀이 중립에 가깝습니다."
+    return_5d = latest["Return_5D"]
+    if pd.notna(return_5d):
+        if return_5d >= 0.10:
+            momentum_score = 62
+            momentum_comment = "최근 5거래일 상승 폭이 커 과열 가능성을 함께 봐야 합니다."
+        elif return_5d >= 0.03:
+            momentum_score = 82
+            momentum_comment = "최근 5거래일 상승 모멘텀이 뚜렷합니다."
+        elif return_5d > 0:
+            momentum_score = 68
+            momentum_comment = "최근 5거래일 흐름이 소폭 우호적입니다."
+        elif return_5d <= -0.08:
+            momentum_score = 25
+            momentum_comment = "최근 5거래일 하락 폭이 커 단기 약세를 주의해야 합니다."
+        elif return_5d < 0:
+            momentum_score = 40
+            momentum_comment = "최근 5거래일 흐름이 약세 쪽입니다."
+    add_score("최근 5거래일 모멘텀", momentum_score, 0.10, momentum_comment)
+
+    rsi_score = 50
+    rsi_comment = "RSI가 중립권에 있습니다."
+    if latest["RSI"] >= 75:
+        rsi_score = 30
+        rsi_comment = "RSI가 높은 과열권에 있어 단기 추격은 주의가 필요합니다."
+    elif latest["RSI"] >= 70:
+        rsi_score = 42
+        rsi_comment = "RSI가 과열권에 가까워 확인이 필요합니다."
+    elif 45 <= latest["RSI"] <= 65:
+        rsi_score = 72
+        rsi_comment = "RSI가 과열되지 않은 우호적 중립권에 있습니다."
+    elif 35 <= latest["RSI"] < 45:
+        rsi_score = 58
+        rsi_comment = "RSI가 중립 이하로 눌림 여부를 참고할 수 있습니다."
+    elif latest["RSI"] < 35:
+        rsi_score = 45
+        rsi_comment = "RSI가 침체권에 가까워 반등 확인이 필요합니다."
+    add_score("RSI 스윙", rsi_score, 0.10, rsi_comment)
+
+    macd_score = 50
+    macd_comment = "MACD 흐름이 중립에 가깝습니다."
+    if latest["MACD"] > latest["MACD_Signal"] and latest["MACD_Histogram_Change"] > 0:
+        macd_score = 80
+        macd_comment = "MACD가 Signal 위에 있고 Histogram도 개선되고 있습니다."
+    elif latest["MACD"] > latest["MACD_Signal"]:
+        macd_score = 70
+        macd_comment = "MACD가 Signal 위에 있어 단기 모멘텀이 우호적입니다."
+    elif previous["MACD"] <= previous["MACD_Signal"] and latest["MACD"] > latest["MACD_Signal"]:
+        macd_score = 85
+        macd_comment = "MACD가 Signal을 상향 돌파해 단기 전환 신호를 참고할 수 있습니다."
+    elif latest["MACD"] < latest["MACD_Signal"] and latest["MACD_Histogram_Change"] < 0:
+        macd_score = 30
+        macd_comment = "MACD가 Signal 아래에 있고 Histogram도 약화되고 있습니다."
+    elif previous["MACD"] >= previous["MACD_Signal"] and latest["MACD"] < latest["MACD_Signal"]:
+        macd_score = 25
+        macd_comment = "MACD가 Signal을 하향 돌파해 단기 약화 신호를 참고해야 합니다."
+    add_score("MACD 스윙", macd_score, 0.15, macd_comment)
+
+    volume_score = 50
+    volume_comment = "거래량이 평균 수준에 가깝습니다."
+    volume_ratio = latest["Volume"] / latest["Volume_MA20"] if latest["Volume_MA20"] else np.nan
+    if pd.notna(volume_ratio):
+        if volume_ratio >= 1.4 and latest["Close"] > previous["Close"]:
+            volume_score = 78
+            volume_comment = "평균보다 큰 거래량과 가격 상승이 함께 나타났습니다."
+        elif volume_ratio >= 1.1 and latest["Close"] >= previous["Close"]:
+            volume_score = 68
+            volume_comment = "평균 이상 거래량에서 가격이 비교적 우호적으로 움직였습니다."
+        elif latest["Volume"] > previous["Volume"] and latest["Close"] < previous["Close"]:
+            volume_score = 32
+            volume_comment = "거래량이 늘었지만 가격이 밀려 매도 압력 확인이 필요합니다."
+        elif volume_ratio < 0.7:
+            volume_score = 45
+            volume_comment = "거래량이 낮아 스윙 신호 신뢰도가 제한될 수 있습니다."
+    add_score("거래량 확인", volume_score, 0.10, volume_comment)
+
+    band_position = (latest["Close"] - latest["Bollinger_Lower"]) / (latest["Bollinger_Upper"] - latest["Bollinger_Lower"]) if latest["Bollinger_Upper"] != latest["Bollinger_Lower"] else np.nan
+    bollinger_score = 50
+    bollinger_comment = "종가가 볼린저 밴드 중간권에 있습니다."
+    if pd.notna(band_position):
+        if band_position >= 0.95:
+            bollinger_score = 38
+            bollinger_comment = "종가가 볼린저 상단권에 가까워 단기 과열 가능성을 봐야 합니다."
+        elif band_position >= 0.60:
+            bollinger_score = 72
+            bollinger_comment = "종가가 볼린저 중단선 위에서 우호적인 위치에 있습니다."
+        elif band_position <= 0.08:
+            bollinger_score = 42
+            bollinger_comment = "종가가 볼린저 하단권에 가까워 눌림 또는 약세 여부 확인이 필요합니다."
+        elif band_position < 0.40:
+            bollinger_score = 45
+            bollinger_comment = "종가가 볼린저 중단선 아래쪽에 있어 흐름 확인이 필요합니다."
+    add_score("볼린저 밴드 위치", bollinger_score, 0.10, bollinger_comment)
+
+    adx_score = 50
+    adx_comment = "ADX 기준 추세 강도는 중립 수준입니다."
+    if latest["ADX"] >= 25 and latest["Close"] > latest["MA20"] and latest["MACD"] > latest["MACD_Signal"]:
+        adx_score = 75
+        adx_comment = "ADX가 25 이상이고 가격/모멘텀 조건도 우호적입니다."
+    elif latest["ADX"] >= 25 and latest["Close"] < latest["MA20"] and latest["MACD"] < latest["MACD_Signal"]:
+        adx_score = 30
+        adx_comment = "ADX가 25 이상이지만 약세 조건이 함께 나타납니다."
+    elif latest["ADX"] < 18:
+        adx_score = 50
+        adx_comment = "ADX가 낮아 횡보 가능성을 함께 봐야 합니다."
+    add_score("ADX 추세 강도", adx_score, 0.05, adx_comment)
+
+    atr_score = 60
+    atr_comment = "ATR 기준 변동성이 감내 가능한 범위에 가깝습니다."
+    if latest["ATR_Ratio"] >= 0.08:
+        atr_score = 20
+        atr_comment = "ATR 비율이 매우 높아 변동성 확대에 주의가 필요합니다."
+    elif latest["ATR_Ratio"] >= 0.06:
+        atr_score = 32
+        atr_comment = "ATR 비율이 높은 편이라 스윙 변동성 관리가 필요합니다."
+    elif latest["ATR_Ratio"] >= 0.035:
+        atr_score = 48
+        atr_comment = "ATR 비율이 보통 이상입니다."
+    elif latest["ATR_Ratio"] <= 0.015:
+        atr_score = 72
+        atr_comment = "ATR 비율이 낮아 변동성이 비교적 안정적입니다."
+    add_score("ATR 변동성 안정성", atr_score, 0.05, atr_comment)
+
+    obv_score = 50
+    obv_comment = "OBV 누적 흐름은 중립에 가깝습니다."
+    if latest["OBV"] > latest["OBV_MA20"] and latest["OBV"] > previous["OBV"]:
+        obv_score = 75
+        obv_comment = "OBV가 20일 평균 위에서 개선되어 누적 흐름이 우호적입니다."
+    elif latest["OBV"] < latest["OBV_MA20"] and latest["OBV"] < previous["OBV"]:
+        obv_score = 32
+        obv_comment = "OBV가 20일 평균 아래에서 약화되고 있습니다."
+    elif len(recent) == 5 and recent["Close"].iloc[-1] > recent["Close"].iloc[0] and recent["OBV"].iloc[-1] < recent["OBV"].iloc[0]:
+        obv_score = 40
+        obv_comment = "가격 상승에 비해 OBV가 따라오지 않아 확인이 필요합니다."
+    add_score("OBV 누적 흐름", obv_score, 0.05, obv_comment)
+
+    return pd.DataFrame(rows)
+
+
+def classify_swing_condition(result):
+    if not result or result.get("swing_score") is None:
+        return "분석 불가"
+
+    if result.get("risk_note"):
+        return result["risk_note"]
+    if result.get("overheat"):
+        return "과열 주의"
+    if result.get("pullback"):
+        return "눌림목 점검 후보"
+    if result.get("volatility_warning"):
+        return "변동성 확대 주의"
+
+    score = result["swing_score"]
+
+    if score >= 61:
+        return "단기 우세 흐름"
+    if score <= 39:
+        return "단기 약세 흐름"
+    return "관망/확인 구간"
+
+
+def calculate_swing_score_100(df, asset_meta=None):
+    analyzed, valid_df = _get_swing_ready_df(df)
+    asset_meta = asset_meta or {}
+    asset_type = asset_meta.get("asset_type", "stock")
+
+    if len(valid_df) < 2:
+        return {
+            "swing_score": None,
+            "swing_signal": "분석 불가",
+            "condition": "분석 불가",
+            "score_details": pd.DataFrame(),
+            "comments": ["1개월 스윙 점검에 필요한 데이터가 부족합니다."],
+            "risk_badges": asset_meta.get("risk_badges", []),
+        }
+
+    latest = valid_df.iloc[-1]
+    score_details = build_swing_score_breakdown(analyzed)
+    weighted_score = np.average(score_details["점수"], weights=score_details["가중치"])
+    swing_score = clamp_score_100(weighted_score)
+    overheat = bool((latest["RSI"] >= 70) or (pd.notna(latest["Swing_Range_Position"]) and latest["Swing_Range_Position"] >= 0.95))
+    pullback = bool((latest["RSI"] <= 35) or (pd.notna(latest["Swing_Range_Position"]) and latest["Swing_Range_Position"] <= 0.15))
+    volatility_warning = bool(pd.notna(latest["ATR_Ratio"]) and latest["ATR_Ratio"] >= 0.06)
+    risk_badges = asset_meta.get("risk_badges", [])
+    risk_note = ""
+
+    if asset_meta.get("direction") == "inverse":
+        risk_note = "인버스 방향성 확인 필요"
+    elif risk_badges:
+        risk_note = "구조적 위험 참고"
+
+    result = {
+        "swing_score": swing_score,
+        "swing_signal": score_to_swing_signal_100(swing_score, asset_type),
+        "score_details": score_details,
+        "comments": score_details["해석"].tolist(),
+        "basis_date": latest.name.date(),
+        "return_20d": latest["Return_20D"],
+        "return_5d": latest["Return_5D"],
+        "high_20_gap": latest["High_20_Gap"],
+        "low_20_gap": latest["Low_20_Gap"],
+        "range_position": latest["Swing_Range_Position"],
+        "atr_ratio": latest["ATR_Ratio"],
+        "overheat": overheat,
+        "pullback": pullback,
+        "volatility_warning": volatility_warning,
+        "risk_badges": risk_badges,
+        "risk_note": risk_note,
+        "asset_type": asset_type,
+    }
+    result["condition"] = classify_swing_condition(result)
+
+    return result
 
 
 def build_signal_history(df):
@@ -1329,6 +1781,90 @@ def create_intraday_chart(df):
     return apply_chart_theme(fig)
 
 
+def create_swing_chart(df):
+    analyzed = calculate_swing_indicators(df)
+    chart_df = analyzed.tail(45).copy()
+    fig = go.Figure()
+
+    if chart_df.empty:
+        fig.update_layout(
+            title="1개월 스윙 점검 차트",
+            xaxis_title="날짜",
+            yaxis_title="가격",
+            hovermode="x unified",
+            height=480,
+            xaxis_rangeslider_visible=False,
+        )
+        return apply_chart_theme(fig)
+
+    fig.add_trace(
+        go.Candlestick(
+            x=chart_df.index,
+            open=chart_df["Open"],
+            high=chart_df["High"],
+            low=chart_df["Low"],
+            close=chart_df["Close"],
+            name="일봉 캔들",
+            increasing_line_color="#ef4444",
+            decreasing_line_color="#2563eb",
+        )
+    )
+
+    line_traces = [
+        ("MA5", "MA5", "#f59e0b"),
+        ("MA10", "MA10", "#8b5cf6"),
+        ("MA20", "MA20", "#10b981"),
+    ]
+
+    for column, name, color in line_traces:
+        if column in chart_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=chart_df.index,
+                    y=chart_df[column],
+                    mode="lines",
+                    name=name,
+                    line=dict(width=1.3, color=color),
+                )
+            )
+
+    recent_20 = chart_df.tail(20)
+
+    if not recent_20.empty:
+        high_20 = recent_20["High"].max()
+        low_20 = recent_20["Low"].min()
+        fig.add_trace(
+            go.Scatter(
+                x=[recent_20.index.min(), recent_20.index.max()],
+                y=[high_20, high_20],
+                mode="lines",
+                name="20일 고점",
+                line=dict(color="#dc2626", width=1, dash="dot"),
+                hovertemplate=f"20일 고점: {high_20:,.2f}<extra></extra>",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[recent_20.index.min(), recent_20.index.max()],
+                y=[low_20, low_20],
+                mode="lines",
+                name="20일 저점",
+                line=dict(color="#2563eb", width=1, dash="dot"),
+                hovertemplate=f"20일 저점: {low_20:,.2f}<extra></extra>",
+            )
+        )
+
+    fig.update_layout(
+        title="1개월 스윙 점검 차트",
+        xaxis_title="날짜",
+        yaxis_title="가격",
+        hovermode="x unified",
+        height=500,
+        xaxis_rangeslider_visible=False,
+    )
+    return apply_chart_theme(fig)
+
+
 def get_dart_api_key():
     try:
         key = st.secrets.get("DART_API_KEY", "")
@@ -1570,6 +2106,67 @@ def render_intraday_summary(df, result):
                 st.write(f"- {comment}")
 
 
+def render_swing_summary(df, result):
+    st.subheader("1개월 스윙 점검")
+
+    if not result or result.get("swing_score") is None:
+        st.info("1개월 스윙 점검에 필요한 데이터가 부족합니다.")
+        return
+
+    badge_class = get_signal_badge_class_100(result["swing_score"])
+    risk_badges = result.get("risk_badges", [])
+    risk_badge_html = " ".join(
+        f"<span class='signal-badge signal-neutral'>{html.escape(str(badge))}</span>" for badge in risk_badges
+    )
+    condition = result.get("condition", "관망/확인 구간")
+    cards = [
+        ("1개월 스윙 조건 충족도", f"{result['swing_score']} / 100", "단기 스윙 점검 점수"),
+        (
+            "스윙 참고 신호",
+            f"<span class='signal-badge {badge_class}'>{result['swing_signal']}</span>",
+            "기술적 조건 기준",
+        ),
+        ("1개월 수익률", format_percent(result["return_20d"]), "최근 20거래일"),
+        ("최근 5거래일 수익률", format_percent(result["return_5d"]), "단기 모멘텀"),
+        ("20일 고점 대비 위치", format_percent(result["high_20_gap"]), "고점 대비"),
+        ("20일 저점 대비 위치", format_percent(result["low_20_gap"]), "저점 대비"),
+        ("변동성 상태", format_percent(result["atr_ratio"]), "ATR 비율"),
+        ("과열/눌림 참고", condition, "판단 보조"),
+    ]
+
+    card_html = "<div class='metric-grid'>"
+    for label, value, sub in cards:
+        card_html += (
+            "<div class='metric-card'>"
+            f"<div class='label'>{label}</div>"
+            f"<div class='value'>{value}</div>"
+            f"<div class='sub'>{sub}</div>"
+            "</div>"
+        )
+    card_html += "</div>"
+
+    st.markdown(card_html, unsafe_allow_html=True)
+
+    notice = "1개월 스윙 조건 충족도는 단기 기술적 조건이 얼마나 충족되었는지를 나타내는 판단 보조 점수입니다."
+    if result.get("asset_type") in ["인버스 ETF", "인버스 레버리지 ETF"]:
+        notice += " 인버스 상품의 점수는 해당 상품 가격 기준이며, 기초지수 방향성과 반대로 움직일 수 있습니다."
+
+    st.markdown(
+        f"""
+        <div class="basis-card">
+            <b>스윙 기준 날짜:</b> {result['basis_date']}<br>
+            <b>안내:</b> {notice}
+            {f"<br><b>구조적 위험:</b> {risk_badge_html}" if risk_badges else ""}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if not result["score_details"].empty:
+        with st.expander("1개월 스윙 세부 점수 보기", expanded=False):
+            st.dataframe(result["score_details"], use_container_width=True, hide_index=True)
+
+
 def parse_watchlist_input(text, max_count=WATCHLIST_MAX_COUNT):
     raw_items = text.replace(",", "\n").splitlines()
     tickers = []
@@ -1663,6 +2260,14 @@ def classify_watchlist_candidate(row):
         return "공시 확인 필요"
     if row.get("변동성 리스크") == "높음":
         return "변동성 주의"
+    if row.get("과열/눌림 참고") == "과열 주의":
+        return "과열 주의"
+    if row.get("과열/눌림 참고") == "눌림목 점검 후보":
+        return "눌림목 점검 후보"
+    if "구조적 위험" in str(row.get("과열/눌림 참고", "")) or "구조적 위험" in str(row.get("구조적 위험 참고", "")):
+        return "레버리지 구조 위험 참고"
+    if "인버스" in str(row.get("과열/눌림 참고", "")):
+        return "인버스 방향성 확인 필요"
     if pd.notna(rsi) and rsi >= 70:
         return "과열 주의"
     if daily_score >= 7 and intraday_score >= 7:
@@ -1678,6 +2283,7 @@ def classify_watchlist_candidate(row):
 
 def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_key):
     normalized_ticker = normalize_ticker(ticker)
+    asset_meta = infer_asset_meta(normalized_ticker)
 
     try:
         daily_df = get_daily_data(normalized_ticker, daily_period)
@@ -1692,6 +2298,8 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
             raise ValueError("기술적 지표 데이터 부족")
 
         daily_result = calculate_signal(analyzed_df)
+        swing_analyzed_df = calculate_swing_indicators(analyzed_df)
+        swing_result = calculate_swing_score_100(swing_analyzed_df, asset_meta)
         latest = valid_df.iloc[-1]
         previous = valid_df.iloc[-2]
         intraday_df = get_intraday_data(normalized_ticker, intraday_interval)
@@ -1710,6 +2318,12 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
             "종목 코드": normalized_ticker,
             "일봉 기술 점수": daily_result["technical_score"],
             "일봉 보조 판단": daily_result["signal"],
+            "1개월 스윙 조건 충족도": swing_result.get("swing_score") if swing_result.get("swing_score") is not None else np.nan,
+            "스윙 참고 신호": swing_result.get("swing_signal", "분석 불가"),
+            "1개월 수익률": swing_result.get("return_20d", np.nan),
+            "최근 5거래일 수익률": swing_result.get("return_5d", np.nan),
+            "과열/눌림 참고": swing_result.get("condition", "분석 불가"),
+            "구조적 위험 참고": ", ".join(swing_result.get("risk_badges", [])) if swing_result.get("risk_badges") else "-",
             "당일 흐름 점수": intraday_result.get("flow_score") if intraday_result.get("flow_score") is not None else np.nan,
             "당일 흐름 판단": intraday_result.get("flow_signal", "분석 불가"),
             "RSI": round(float(latest["RSI"]), 2),
@@ -1728,6 +2342,12 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
             "종목 코드": normalized_ticker,
             "일봉 기술 점수": np.nan,
             "일봉 보조 판단": "분석 실패",
+            "1개월 스윙 조건 충족도": np.nan,
+            "스윙 참고 신호": "분석 실패",
+            "1개월 수익률": np.nan,
+            "최근 5거래일 수익률": np.nan,
+            "과열/눌림 참고": "분석 실패",
+            "구조적 위험 참고": ", ".join(asset_meta.get("risk_badges", [])) if asset_meta.get("risk_badges") else "-",
             "당일 흐름 점수": np.nan,
             "당일 흐름 판단": "분석 실패",
             "RSI": np.nan,
@@ -1757,6 +2377,7 @@ def render_watchlist_priority_cards(result_df):
             f"<div class='score'>{row['종합 점검 점수']} / 10</div>"
             "<div class='meta'>"
             f"일봉: {html.escape(str(row['일봉 보조 판단']))}<br>"
+            f"스윙: {html.escape(str(row.get('스윙 참고 신호', '-')))}<br>"
             f"당일: {html.escape(str(row['당일 흐름 판단']))}<br>"
             f"유형: {html.escape(str(row['점검 유형']))}"
             "</div>"
@@ -1768,13 +2389,13 @@ def render_watchlist_priority_cards(result_df):
 
 
 def render_watchlist_scanner(dart_api_key):
-    st.subheader("관심종목 스캐너")
-    st.write("여러 종목을 한 번에 점검해 오늘 먼저 살펴볼 분석 후보를 정리합니다.")
+    st.subheader("관심자산 스캐너")
+    st.write("여러 자산을 한 번에 점검해 오늘 먼저 살펴볼 분석 후보를 정리합니다.")
     st.caption("이 영역은 투자 판단을 대신하지 않으며, 기술적 조건과 공개 정보 확인을 위한 판단 보조 화면입니다.")
 
-    default_watchlist = "005930.KS, 000660.KS, 035420.KS, 051910.KS, AAPL, MSFT, NVDA, TSLA"
+    default_watchlist = "005930.KS, 000660.KS, AAPL, MSFT, SPY, TQQQ, SQQQ"
     watchlist_text = st.text_area(
-        "관심종목 코드를 입력하세요",
+        "관심자산 코드를 입력하세요",
         value=default_watchlist,
         height=120,
         help="쉼표 또는 줄바꿈으로 구분하세요. 6자리 한국 종목 코드는 자동으로 .KS가 붙습니다.",
@@ -1787,19 +2408,19 @@ def render_watchlist_scanner(dart_api_key):
         scanner_interval = st.selectbox("스캐너 분봉 간격", ["5m", "15m", "30m", "60m"], index=0)
 
     period_map = {"3개월": "3mo", "6개월": "6mo", "1년": "1y"}
-    analyze_watchlist = st.button("관심종목 분석 후보 찾기", type="primary")
+    analyze_watchlist = st.button("관심자산 분석 후보 찾기", type="primary")
 
     if analyze_watchlist:
         tickers, overflow_count = parse_watchlist_input(watchlist_text)
 
         if not tickers:
-            st.warning("분석할 관심종목 코드를 입력하세요.")
+            st.warning("분석할 관심자산 코드를 입력하세요.")
         else:
             if overflow_count > 0:
                 st.info(f"최대 {WATCHLIST_MAX_COUNT}개까지만 분석합니다. 초과 입력된 {overflow_count}개 종목은 이번 분석에서 제외했습니다.")
 
             rows = []
-            progress = st.progress(0, text="관심종목을 분석하는 중입니다...")
+            progress = st.progress(0, text="관심자산을 분석하는 중입니다...")
 
             for index, ticker in enumerate(tickers, start=1):
                 rows.append(analyze_watchlist_ticker(ticker, period_map[scanner_period_option], scanner_interval, dart_api_key))
@@ -1813,7 +2434,7 @@ def render_watchlist_scanner(dart_api_key):
     result_df = st.session_state.get("watchlist_result", pd.DataFrame())
 
     if result_df.empty:
-        st.info("관심종목을 입력한 뒤 분석 후보 찾기를 누르면 오늘의 분석 후보가 표시됩니다.")
+        st.info("관심자산을 입력한 뒤 분석 후보 찾기를 누르면 오늘의 분석 후보가 표시됩니다.")
         return
 
     render_watchlist_priority_cards(result_df)
@@ -1828,6 +2449,8 @@ def render_watchlist_scanner(dart_api_key):
         "공시 확인 필요",
         "변동성 주의",
         "과열 주의",
+        "레버리지 구조 위험 참고",
+        "인버스 방향성 확인 필요",
         "관망 후보",
         "분석 실패",
     ]
@@ -1842,6 +2465,12 @@ def render_watchlist_scanner(dart_api_key):
         "종목 코드",
         "일봉 기술 점수",
         "일봉 보조 판단",
+        "1개월 스윙 조건 충족도",
+        "스윙 참고 신호",
+        "1개월 수익률",
+        "최근 5거래일 수익률",
+        "과열/눌림 참고",
+        "구조적 위험 참고",
         "당일 흐름 점수",
         "당일 흐름 판단",
         "RSI",
@@ -1852,6 +2481,10 @@ def render_watchlist_scanner(dart_api_key):
         "점검 유형",
         "종합 점검 점수",
     ]
+    for percent_column in ["1개월 수익률", "최근 5거래일 수익률"]:
+        if percent_column in display_df.columns:
+            display_df[percent_column] = display_df[percent_column].apply(format_percent)
+
     st.dataframe(display_df[display_columns], use_container_width=True, hide_index=True)
     st.caption("종합 점검 점수는 정렬용 참고 점수이며, 일봉 기술 점수와 당일 흐름 점수를 대체하지 않습니다.")
 
@@ -1863,7 +2496,8 @@ def render_usage_guide():
         - 본 프로그램은 실제 투자 조언이 아닌 기술적 분석 및 공개 정보 확인을 위한 개인용 판단 보조 도구입니다.
         - yfinance 데이터는 실제 증권사/거래소 데이터와 차이가 있을 수 있으며, 분봉 데이터는 실시간 시세가 아니라 지연될 수 있습니다.
         - 공시와 뉴스는 기술적 점수에 직접 반영하지 않고 참고 정보로만 표시합니다.
-        - 관심종목 스캐너의 분석 후보는 먼저 점검할 대상을 정리하는 기능이며 매매 판단을 대신하지 않습니다.
+        - 1개월 스윙 점검은 최근 약 20거래일 흐름을 기준으로 단기 조건 충족도를 확인하는 판단 보조 기능입니다.
+        - 관심자산 스캐너의 분석 후보는 먼저 점검할 대상을 정리하는 기능이며 매매 판단을 대신하지 않습니다.
         - DART 공시는 한국 6자리 종목 코드에서만 조회되며, 미국 종목은 해당 없음으로 표시됩니다.
         """
     )
@@ -1885,8 +2519,8 @@ def render_single_stock_analysis(
             <div class="empty-guide">
                 <h3>분석을 시작해보세요</h3>
                 <p>
-                    왼쪽 사이드바에서 종목과 분석 기간을 선택한 뒤 <b>분석 시작</b>을 누르면
-                    기술적 분석 점수, 보조 판단, 차트, 백테스트, 공시/뉴스 참고 정보를 확인할 수 있습니다.
+                    왼쪽 사이드바에서 자산 코드와 분석 기간을 선택한 뒤 <b>분석 시작</b>을 누르면
+                    기술적 분석 점수, 1개월 스윙 점검, 보조 판단, 차트, 백테스트, 공시/뉴스 참고 정보를 확인할 수 있습니다.
                     점수 해석은 1-2점 매도 우세 강함, 3-4점 매도 우세, 5-6점 관망 구간,
                     7-8점 매수 우세, 9-10점 매수 우세 강함입니다.
                 </p>
@@ -1897,7 +2531,7 @@ def render_single_stock_analysis(
         return
 
     if not ticker.strip():
-        st.error("종목 코드를 입력하세요.")
+        st.error("자산 코드를 입력하세요.")
         return
 
     normalized_ticker = normalize_ticker(ticker)
@@ -1906,7 +2540,7 @@ def render_single_stock_analysis(
         daily_df = get_daily_data(normalized_ticker, period_map[period_option])
 
     if daily_df.empty:
-        st.error("주가 데이터를 가져오지 못했습니다. 종목 코드나 데이터 제공 상태를 확인하세요.")
+        st.error("주가 데이터를 가져오지 못했습니다. 자산 코드나 데이터 제공 상태를 확인하세요.")
         return
 
     if len(daily_df) < 60:
@@ -1922,6 +2556,9 @@ def render_single_stock_analysis(
 
     signal_result = calculate_signal(analyzed_df)
     latest = valid_df.iloc[-1]
+    asset_meta = infer_asset_meta(normalized_ticker)
+    swing_analyzed_df = calculate_swing_indicators(analyzed_df)
+    swing_result = calculate_swing_score_100(swing_analyzed_df, asset_meta)
 
     st.subheader(f"{normalized_ticker} 분석 요약")
 
@@ -1938,6 +2575,8 @@ def render_single_stock_analysis(
     st.subheader("평가 항목별 점수")
     st.dataframe(signal_result["score_details"], use_container_width=True)
 
+    render_swing_summary(swing_analyzed_df, swing_result)
+
     signal_history = build_signal_history(analyzed_df)
 
     chart_tab, history_tab, backtest_tab, external_tab, data_tab = st.tabs(
@@ -1945,12 +2584,15 @@ def render_single_stock_analysis(
     )
 
     with chart_tab:
-        price_tab, volume_tab, rsi_tab, macd_tab, trend_tab, obv_tab, intraday_tab = st.tabs(
-            ["주가", "거래량", "RSI", "MACD", "ADX/ATR", "OBV", "분봉 참고"]
+        price_tab, swing_tab, volume_tab, rsi_tab, macd_tab, trend_tab, obv_tab, intraday_tab = st.tabs(
+            ["주가", "1개월 스윙", "거래량", "RSI", "MACD", "ADX/ATR", "OBV", "분봉 참고"]
         )
 
         with price_tab:
             st.plotly_chart(create_price_chart(analyzed_df, signal_history), use_container_width=True)
+        with swing_tab:
+            st.plotly_chart(create_swing_chart(swing_analyzed_df), use_container_width=True)
+            st.caption("1개월 스윙 차트는 최근 약 20거래일 흐름을 중심으로 단기 추세, 고저점 위치, 이동평균 흐름을 참고합니다.")
         with volume_tab:
             st.plotly_chart(create_volume_chart(analyzed_df), use_container_width=True)
         with rsi_tab:
@@ -2043,7 +2685,7 @@ def render_hero():
             <h1>이영록 스톡랩</h1>
             <p>
                 기술적 지표와 공개 정보를 함께 확인하는 판단 보조 도구입니다.
-                단일 종목 상세 분석과 관심종목 스캐너를 통해 점검 우선 종목과 참고 신호를 한 화면에서 정리합니다.
+                단일 자산 상세 분석, 1개월 스윙 점검, 관심자산 스캐너를 통해 점검 우선 자산과 참고 신호를 한 화면에서 정리합니다.
             </p>
             <div class="notice-row">
                 <div class="notice">본 프로그램은 실제 투자 조언이 아닌 기술적 분석 및 공개 정보 확인을 위한 개인용 판단 보조 도구입니다.</div>
@@ -2068,7 +2710,7 @@ def main():
 
     with st.sidebar:
         st.header("분석 설정")
-        ticker = st.text_input("종목 코드를 입력하세요", value="005930.KS", help="예: 005930.KS, 005930, AAPL, MSFT, TSLA")
+        ticker = st.text_input("자산 코드를 입력하세요", value="005930.KS", help="예: 005930.KS, 005930, AAPL, MSFT, SPY, TQQQ, SQQQ")
         period_option = st.selectbox("일봉 분석 기간", ["3개월", "6개월", "1년", "2년", "5년"], index=2)
         show_intraday = st.checkbox("분봉 참고 차트 표시", value=True)
         intraday_interval = st.selectbox("분봉 간격", ["1m", "5m", "15m", "30m", "60m"], index=1)
@@ -2090,7 +2732,7 @@ def main():
     if analyze:
         st.session_state.analysis_started = True
 
-    single_tab, scanner_tab, guide_tab = st.tabs(["단일 종목 분석", "관심종목 스캐너", "사용 안내"])
+    single_tab, scanner_tab, guide_tab = st.tabs(["단일 자산 분석", "관심자산 스캐너", "사용 안내"])
 
     with single_tab:
         render_single_stock_analysis(
