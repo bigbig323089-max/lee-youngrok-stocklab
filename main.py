@@ -1,10 +1,11 @@
 import json
 import html
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -104,6 +105,13 @@ ASSET_METADATA_COLUMNS = [
     "risk_note",
 ]
 ASSET_METADATA_PATH = Path(__file__).with_name("asset_metadata.csv")
+DATA_SOURCE_OPTIONS = {
+    "auto": "자동(KIS 우선, 실패 시 yfinance)",
+    "kis": "한국투자 KIS 우선",
+    "yfinance": "yfinance 참고 데이터",
+}
+KIS_REAL_BASE_URL = "https://openapi.koreainvestment.com:9443"
+KIS_PAPER_BASE_URL = "https://openapivts.koreainvestment.com:29443"
 
 
 def normalize_ticker(ticker):
@@ -231,6 +239,198 @@ def resolve_asset_input(value):
         "matched": bool(ticker_metadata),
         "metadata": ticker_metadata,
     }
+
+
+def get_secret_value(key, default=""):
+    try:
+        value = st.secrets.get(key, "")
+        if value:
+            return str(value).strip()
+    except Exception:
+        pass
+
+    secrets_path = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
+
+    try:
+        for line in secrets_path.read_text(encoding="utf-8-sig").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+
+            key_name, key_value = stripped.split("=", 1)
+
+            if key_name.strip() == key:
+                return key_value.strip().strip('"').strip("'")
+    except Exception:
+        return default
+
+    return default
+
+
+def normalize_data_source(value):
+    normalized = str(value or "auto").strip().lower()
+
+    if normalized in ["kis", "korea_investment", "koreainvestment", "한국투자", "한국투자증권"]:
+        return "kis"
+    if normalized in ["yf", "yahoo", "yfinance"]:
+        return "yfinance"
+
+    return "auto"
+
+
+def get_configured_data_source():
+    return normalize_data_source(get_secret_value("DATA_SOURCE", "auto"))
+
+
+def get_kis_config():
+    base_url = get_secret_value("KIS_BASE_URL", KIS_REAL_BASE_URL).rstrip("/")
+
+    return {
+        "app_key": get_secret_value("KIS_APP_KEY", ""),
+        "app_secret": get_secret_value("KIS_APP_SECRET", ""),
+        "base_url": base_url or KIS_REAL_BASE_URL,
+        "paper": "openapivts" in (base_url or "").lower(),
+    }
+
+
+def is_kis_configured():
+    config = get_kis_config()
+    return bool(config["app_key"] and config["app_secret"])
+
+
+def get_data_source_status(preferred_source):
+    source = normalize_data_source(preferred_source)
+    kis_ready = is_kis_configured()
+
+    if source == "yfinance":
+        return "yfinance 참고 데이터", "yfinance만 사용합니다."
+    if source == "kis":
+        if kis_ready:
+            return "한국투자 KIS 우선", "KIS 지원 자산은 KIS로 조회하고, 미지원/실패 시 yfinance로 보완합니다."
+        return "한국투자 KIS 우선", "KIS 키가 설정되지 않아 yfinance 참고 데이터로 보완합니다."
+    if kis_ready:
+        return "자동(KIS 우선)", "KIS 지원 자산은 KIS로 조회하고, 미지원/실패 시 yfinance로 보완합니다."
+
+    return "자동", "KIS 키가 설정되지 않아 yfinance 참고 데이터로 조회합니다."
+
+
+def set_price_data_attrs(df, source, source_detail="", fallback_reason="", requested_source=""):
+    if df is None:
+        return pd.DataFrame()
+
+    df.attrs["data_source"] = source
+    df.attrs["data_source_detail"] = source_detail
+    df.attrs["fallback_reason"] = fallback_reason
+    df.attrs["requested_source"] = requested_source
+
+    return df
+
+
+def make_json_request(url, method="GET", headers=None, params=None, body=None, timeout=15):
+    request_url = url
+
+    if params:
+        request_url = f"{request_url}?{urllib.parse.urlencode(params)}"
+
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+
+    request = urllib.request.Request(
+        request_url,
+        data=data,
+        headers=headers or {},
+        method=method,
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", errors="ignore")
+    except urllib.error.HTTPError as error:
+        raw = error.read().decode("utf-8", errors="ignore")
+        try:
+            payload = json.loads(raw)
+            message = payload.get("msg1") or payload.get("message") or f"HTTP {error.code}"
+        except Exception:
+            message = f"HTTP {error.code}"
+        raise RuntimeError(message) from None
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"네트워크 오류: {error.reason}") from None
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        raise RuntimeError("JSON 응답을 해석하지 못했습니다.") from None
+
+
+@st.cache_data(ttl=60 * 60 * 5, show_spinner=False)
+def get_kis_access_token(app_key, app_secret, base_url):
+    payload = {
+        "grant_type": "client_credentials",
+        "appkey": app_key,
+        "appsecret": app_secret,
+    }
+    result = make_json_request(
+        f"{base_url}/oauth2/tokenP",
+        method="POST",
+        headers={"content-type": "application/json; charset=utf-8"},
+        body=payload,
+        timeout=20,
+    )
+    token = result.get("access_token")
+
+    if not token:
+        message = result.get("msg1") or result.get("error_description") or "KIS 접근 토큰을 발급받지 못했습니다."
+        raise RuntimeError(message)
+
+    return token
+
+
+def kis_get(path, tr_id, params, timeout=20):
+    config = get_kis_config()
+
+    if not config["app_key"] or not config["app_secret"]:
+        raise RuntimeError("KIS API 키가 설정되지 않았습니다.")
+
+    token = get_kis_access_token(config["app_key"], config["app_secret"], config["base_url"])
+    headers = {
+        "content-type": "application/json; charset=utf-8",
+        "authorization": f"Bearer {token}",
+        "appkey": config["app_key"],
+        "appsecret": config["app_secret"],
+        "tr_id": tr_id,
+        "custtype": "P",
+    }
+
+    return make_json_request(
+        f"{config['base_url']}{path}",
+        method="GET",
+        headers=headers,
+        params=params,
+        timeout=timeout,
+    )
+
+
+def parse_kis_number(value):
+    try:
+        cleaned = str(value or "0").replace(",", "").strip()
+        return float(cleaned) if "." in cleaned else int(cleaned)
+    except (TypeError, ValueError):
+        return np.nan
+
+
+def get_period_lookback_days(period):
+    return {
+        "3mo": 130,
+        "6mo": 230,
+        "1y": 420,
+        "2y": 800,
+        "5y": 1900,
+    }.get(period, 420)
+
+
+def is_kis_domestic_supported(ticker):
+    return bool(get_stock_code(ticker))
 
 
 def enable_auto_refresh(minutes=30):
@@ -529,6 +729,239 @@ def get_stock_code(ticker):
     return None
 
 
+def normalize_kis_daily_rows(rows):
+    parsed_rows = []
+
+    for row in rows or []:
+        date_value = row.get("stck_bsop_date") or row.get("bsop_date")
+        if not date_value:
+            continue
+
+        parsed_rows.append(
+            {
+                "Date": pd.to_datetime(str(date_value), format="%Y%m%d", errors="coerce"),
+                "Open": parse_kis_number(row.get("stck_oprc")),
+                "High": parse_kis_number(row.get("stck_hgpr")),
+                "Low": parse_kis_number(row.get("stck_lwpr")),
+                "Close": parse_kis_number(row.get("stck_clpr") or row.get("stck_prpr")),
+                "Volume": parse_kis_number(row.get("acml_vol") or row.get("cntg_vol")),
+            }
+        )
+
+    if not parsed_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(parsed_rows).dropna(subset=["Date", "Close"])
+    df = df.set_index("Date").sort_index()
+    df = df[REQUIRED_COLUMNS].apply(pd.to_numeric, errors="coerce")
+    df = df.dropna(subset=["Close"])
+    df = df[~df.index.duplicated(keep="last")]
+
+    return df
+
+
+def get_kis_daily_data(ticker, period):
+    stock_code = get_stock_code(ticker)
+
+    if not stock_code:
+        return pd.DataFrame()
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=get_period_lookback_days(period))
+    current_end = end_date
+    rows = []
+
+    for _ in range(20):
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": stock_code,
+            "FID_INPUT_DATE_1": start_date.strftime("%Y%m%d"),
+            "FID_INPUT_DATE_2": current_end.strftime("%Y%m%d"),
+            "FID_PERIOD_DIV_CODE": "D",
+            "FID_ORG_ADJ_PRC": "1",
+        }
+        result = kis_get(
+            "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
+            "FHKST03010100",
+            params,
+        )
+        output_rows = result.get("output2") or []
+
+        if not output_rows:
+            break
+
+        rows.extend(output_rows)
+        batch_df = normalize_kis_daily_rows(output_rows)
+
+        if batch_df.empty:
+            break
+
+        oldest_date = batch_df.index.min().date()
+
+        if oldest_date <= start_date:
+            break
+
+        next_end = oldest_date - timedelta(days=1)
+
+        if next_end >= current_end:
+            break
+
+        current_end = next_end
+
+    df = normalize_kis_daily_rows(rows)
+
+    if df.empty:
+        return df
+
+    df = df[df.index.date >= start_date]
+    return set_price_data_attrs(
+        df,
+        "한국투자 KIS Open API",
+        "국내주식 기간별 시세, 원주가 기준(FID_ORG_ADJ_PRC=1)",
+    )
+
+
+def normalize_kis_intraday_rows(rows):
+    parsed_rows = []
+
+    for row in rows or []:
+        date_value = row.get("stck_bsop_date") or date.today().strftime("%Y%m%d")
+        time_value = str(row.get("stck_cntg_hour") or row.get("cntg_hour") or "").zfill(6)
+
+        if not time_value.strip("0"):
+            continue
+
+        timestamp = pd.to_datetime(f"{date_value}{time_value}", format="%Y%m%d%H%M%S", errors="coerce")
+
+        if pd.isna(timestamp):
+            continue
+
+        close = parse_kis_number(row.get("stck_prpr") or row.get("stck_clpr"))
+        parsed_rows.append(
+            {
+                "Date": timestamp,
+                "Open": parse_kis_number(row.get("stck_oprc")) if row.get("stck_oprc") is not None else close,
+                "High": parse_kis_number(row.get("stck_hgpr")) if row.get("stck_hgpr") is not None else close,
+                "Low": parse_kis_number(row.get("stck_lwpr")) if row.get("stck_lwpr") is not None else close,
+                "Close": close,
+                "Volume": parse_kis_number(row.get("cntg_vol") or row.get("acml_vol")),
+            }
+        )
+
+    if not parsed_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(parsed_rows).dropna(subset=["Date", "Close"])
+    df = df.set_index("Date").sort_index()
+    df = df[REQUIRED_COLUMNS].apply(pd.to_numeric, errors="coerce")
+    df = df.dropna(subset=["Close"])
+    df = df[~df.index.duplicated(keep="last")]
+
+    return df
+
+
+def resample_intraday_ohlcv(df, interval):
+    if df.empty or interval == "1m":
+        return df
+
+    frequency_map = {
+        "5m": "5min",
+        "15m": "15min",
+        "30m": "30min",
+        "60m": "60min",
+    }
+    frequency = frequency_map.get(interval)
+
+    if not frequency:
+        return df
+
+    resampled = df.resample(frequency).agg(
+        {
+            "Open": "first",
+            "High": "max",
+            "Low": "min",
+            "Close": "last",
+            "Volume": "sum",
+        }
+    )
+    resampled = resampled.dropna(subset=["Close"])
+    resampled.attrs.update(df.attrs)
+
+    return resampled
+
+
+def get_kis_intraday_data(ticker, interval):
+    stock_code = get_stock_code(ticker)
+
+    if not stock_code:
+        return pd.DataFrame()
+
+    now = datetime.now()
+
+    if now.hour < 9:
+        current_dt = datetime.combine(date.today(), datetime.strptime("153000", "%H%M%S").time())
+    elif now.hour > 15 or (now.hour == 15 and now.minute > 30):
+        current_dt = datetime.combine(date.today(), datetime.strptime("153000", "%H%M%S").time())
+    else:
+        current_dt = now
+
+    rows = []
+    seen_keys = set()
+
+    for _ in range(8):
+        params = {
+            "FID_ETC_CLS_CODE": "",
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": stock_code,
+            "FID_INPUT_HOUR_1": current_dt.strftime("%H%M%S"),
+            "FID_PW_DATA_INCU_YN": "Y",
+        }
+        result = kis_get(
+            "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
+            "FHKST03010200",
+            params,
+        )
+        output_rows = result.get("output2") or []
+
+        if not output_rows:
+            break
+
+        for row in output_rows:
+            key = (row.get("stck_bsop_date"), row.get("stck_cntg_hour"))
+            if key not in seen_keys:
+                rows.append(row)
+                seen_keys.add(key)
+
+        batch_df = normalize_kis_intraday_rows(output_rows)
+
+        if batch_df.empty:
+            break
+
+        oldest_time = batch_df.index.min().to_pydatetime()
+        next_dt = oldest_time - timedelta(minutes=1)
+
+        if next_dt >= current_dt:
+            break
+
+        current_dt = next_dt
+
+        if current_dt.date() != date.today():
+            break
+
+    df = normalize_kis_intraday_rows(rows)
+
+    if df.empty:
+        return df
+
+    df = set_price_data_attrs(
+        df,
+        "한국투자 KIS Open API",
+        "국내주식 당일분봉 시세",
+    )
+
+    return resample_intraday_ohlcv(df, interval)
+
+
 def normalize_yfinance_data(df, ticker):
     if df is None or df.empty:
         return pd.DataFrame()
@@ -570,8 +1003,27 @@ def normalize_yfinance_data(df, ticker):
 
 
 @st.cache_data(ttl=60 * 30, show_spinner=False)
-def get_daily_data(ticker, period):
+def get_daily_data(ticker, period, preferred_source="auto"):
     ticker = normalize_ticker(ticker)
+    source = normalize_data_source(preferred_source)
+    fallback_reason = ""
+
+    if source in ["auto", "kis"] and is_kis_domestic_supported(ticker):
+        if is_kis_configured():
+            try:
+                kis_df = get_kis_daily_data(ticker, period)
+
+                if not kis_df.empty:
+                    kis_df.attrs["requested_source"] = source
+                    return kis_df
+
+                fallback_reason = "KIS 일봉 데이터가 비어 있어 yfinance로 보완했습니다."
+            except Exception as error:
+                fallback_reason = f"KIS 일봉 조회 실패로 yfinance를 사용했습니다: {error}"
+        elif source == "kis":
+            fallback_reason = "KIS API 키가 설정되지 않아 yfinance로 보완했습니다."
+        else:
+            fallback_reason = "KIS API 키가 설정되지 않아 yfinance를 사용했습니다."
 
     df = yf.download(
         tickers=ticker,
@@ -582,13 +1034,39 @@ def get_daily_data(ticker, period):
         threads=False,
     )
 
-    return normalize_yfinance_data(df, ticker)
+    normalized = normalize_yfinance_data(df, ticker)
+    return set_price_data_attrs(
+        normalized,
+        "yfinance",
+        "Yahoo Finance 참고 데이터",
+        fallback_reason=fallback_reason,
+        requested_source=source,
+    )
 
 
 @st.cache_data(ttl=60 * 5, show_spinner=False)
-def get_intraday_data(ticker, interval):
+def get_intraday_data(ticker, interval, preferred_source="auto"):
     ticker = normalize_ticker(ticker)
+    source = normalize_data_source(preferred_source)
+    fallback_reason = ""
     period = "1d" if interval == "1m" else "5d"
+
+    if source in ["auto", "kis"] and is_kis_domestic_supported(ticker):
+        if is_kis_configured():
+            try:
+                kis_df = get_kis_intraday_data(ticker, interval)
+
+                if not kis_df.empty:
+                    kis_df.attrs["requested_source"] = source
+                    return kis_df
+
+                fallback_reason = "KIS 분봉 데이터가 비어 있어 yfinance로 보완했습니다."
+            except Exception as error:
+                fallback_reason = f"KIS 분봉 조회 실패로 yfinance를 사용했습니다: {error}"
+        elif source == "kis":
+            fallback_reason = "KIS API 키가 설정되지 않아 yfinance로 보완했습니다."
+        else:
+            fallback_reason = "KIS API 키가 설정되지 않아 yfinance를 사용했습니다."
 
     df = yf.download(
         tickers=ticker,
@@ -599,7 +1077,14 @@ def get_intraday_data(ticker, interval):
         threads=False,
     )
 
-    return normalize_yfinance_data(df, ticker)
+    normalized = normalize_yfinance_data(df, ticker)
+    return set_price_data_attrs(
+        normalized,
+        "yfinance",
+        "Yahoo Finance 참고 데이터",
+        fallback_reason=fallback_reason,
+        requested_source=source,
+    )
 
 
 def get_latest_intraday_session(df):
@@ -2295,20 +2780,25 @@ def get_data_quality_status(df):
 def render_data_reference_box(df, ticker, period_option, show_intraday, intraday_interval):
     valid_df = df.dropna(subset=["Close"]) if df is not None and "Close" in df.columns else pd.DataFrame()
     quality_status, quality_comment = get_data_quality_status(df)
+    data_source = df.attrs.get("data_source", "알 수 없음") if df is not None else "알 수 없음"
+    source_detail = df.attrs.get("data_source_detail", "") if df is not None else ""
+    fallback_reason = df.attrs.get("fallback_reason", "") if df is not None else ""
     latest_date = valid_df.index[-1].date() if not valid_df.empty else "-"
     first_date = valid_df.index[0].date() if not valid_df.empty else "-"
     latest_volume = f"{int(valid_df['Volume'].iloc[-1]):,}" if not valid_df.empty and pd.notna(valid_df["Volume"].iloc[-1]) else "-"
     intraday_note = f"{intraday_interval} 분봉 참고 사용" if show_intraday else "분봉 참고 꺼짐"
+    fallback_html = f"<br><b>보완 조회:</b> {html.escape(fallback_reason)}" if fallback_reason else ""
 
     st.markdown(
         f"""
         <div class="basis-card">
             <b>데이터 기준 안내</b><br>
             <b>분석 코드:</b> {html.escape(str(ticker))}<br>
-            <b>데이터 출처:</b> yfinance 참고 데이터<br>
+            <b>데이터 출처:</b> {html.escape(str(data_source))}<br>
+            <b>출처 상세:</b> {html.escape(str(source_detail or "-"))}{fallback_html}<br>
             <b>일봉 분석 기간:</b> {html.escape(str(period_option))} · <b>분봉:</b> {html.escape(str(intraday_note))}<br>
             <b>일봉 범위:</b> {first_date} ~ {latest_date}<br>
-            <b>가격 기준:</b> 일반 Close 기준(auto_adjust=False), OHLCV는 Open/High/Low/Close/Volume 기준<br>
+            <b>가격 기준:</b> OHLCV의 Close 기준, KIS는 원주가 기준, yfinance는 auto_adjust=False 기준<br>
             <b>최근 거래량:</b> {latest_volume}<br>
             <b>데이터 품질:</b> {html.escape(quality_status)} - {html.escape(quality_comment)}<br>
             <b>주의:</b> yfinance 데이터는 실제 증권사/거래소 데이터와 차이가 있을 수 있고, 분봉 데이터는 지연되거나 일부 누락될 수 있습니다.
@@ -2869,7 +3359,7 @@ def classify_watchlist_candidate(row):
     return "관망 후보"
 
 
-def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_key):
+def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_key, data_source_preference="auto"):
     asset_ref = ticker if isinstance(ticker, dict) else resolve_asset_input(ticker)
     normalized_ticker = asset_ref["ticker"]
     asset_meta = infer_asset_meta(normalized_ticker)
@@ -2877,7 +3367,7 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
         asset_meta["name"] = asset_ref["name"]
 
     try:
-        daily_df = get_daily_data(normalized_ticker, daily_period)
+        daily_df = get_daily_data(normalized_ticker, daily_period, data_source_preference)
 
         if daily_df.empty or len(daily_df) < 60:
             raise ValueError("일봉 데이터 부족")
@@ -2893,7 +3383,7 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
         swing_result = calculate_swing_score_100(swing_analyzed_df, asset_meta)
         latest = valid_df.iloc[-1]
         previous = valid_df.iloc[-2]
-        intraday_df = get_intraday_data(normalized_ticker, intraday_interval)
+        intraday_df = get_intraday_data(normalized_ticker, intraday_interval, data_source_preference)
 
         if intraday_df.empty:
             intraday_result = {"flow_score": None, "flow_signal": "분석 불가"}
@@ -2923,6 +3413,8 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
             "MACD 상태": get_macd_status(latest),
             "거래량 상태": volume_status,
             "변동성 리스크": daily_result["risk_level"],
+            "데이터 출처": daily_df.attrs.get("data_source", "-"),
+            "데이터 품질": get_data_quality_status(daily_df)[0],
             "DART 공시 여부": disclosure_status,
             "점검 유형": "관망 후보",
             "종합 점검 점수": calculate_watchlist_score(daily_result, intraday_result, score_latest, disclosures),
@@ -2949,6 +3441,8 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
             "MACD 상태": "분석 실패",
             "거래량 상태": "분석 실패",
             "변동성 리스크": "분석 실패",
+            "데이터 출처": "-",
+            "데이터 품질": "조회 실패",
             "DART 공시 여부": "확인 실패" if get_stock_code(normalized_ticker) else "해당 없음",
             "점검 유형": "분석 실패",
             "종합 점검 점수": 1,
@@ -2987,7 +3481,7 @@ def render_watchlist_priority_cards(result_df):
     st.markdown(card_html, unsafe_allow_html=True)
 
 
-def render_watchlist_scanner(dart_api_key):
+def render_watchlist_scanner(dart_api_key, data_source_preference="auto"):
     st.subheader("관심자산 스캐너")
     st.write("여러 자산을 한 번에 점검해 오늘 먼저 살펴볼 분석 후보를 정리합니다.")
     st.caption("이 영역은 투자 판단을 대신하지 않으며, 기술적 조건과 공개 정보 확인을 위한 판단 보조 화면입니다.")
@@ -3022,7 +3516,15 @@ def render_watchlist_scanner(dart_api_key):
             progress = st.progress(0, text="관심자산을 분석하는 중입니다...")
 
             for index, asset_ref in enumerate(assets, start=1):
-                rows.append(analyze_watchlist_ticker(asset_ref, period_map[scanner_period_option], scanner_interval, dart_api_key))
+                rows.append(
+                    analyze_watchlist_ticker(
+                        asset_ref,
+                        period_map[scanner_period_option],
+                        scanner_interval,
+                        dart_api_key,
+                        data_source_preference,
+                    )
+                )
                 progress.progress(index / len(assets), text=f"{asset_ref['name']} 분석 중 ({index}/{len(assets)})")
 
             progress.empty()
@@ -3078,6 +3580,8 @@ def render_watchlist_scanner(dart_api_key):
         "MACD 상태",
         "거래량 상태",
         "변동성 리스크",
+        "데이터 출처",
+        "데이터 품질",
         "DART 공시 여부",
         "점검 유형",
         "종합 점검 점수",
@@ -3467,6 +3971,7 @@ def render_usage_guide():
         인버스 상품의 점수는 해당 상품 가격 기준이며, 기초지수 방향성과 반대로 움직일 수 있습니다.
 
         ### 데이터 한계
+        - KIS API 키가 설정된 경우 국내 주식/ETF는 한국투자 KIS Open API를 우선 사용하고, 미지원 자산이나 조회 실패 시 yfinance 참고 데이터로 보완합니다.
         - yfinance 데이터는 실제 증권사 HTS/MTS 또는 거래소 공식 데이터와 차이가 있을 수 있습니다.
         - 데이터 기준 안내 박스에서 최근 거래일, 가격 기준, 데이터 품질 상태를 먼저 확인하세요.
         - 분봉 데이터는 실시간 시세가 아니며 지연되거나 일부 누락될 수 있습니다.
@@ -3487,6 +3992,7 @@ def render_single_stock_analysis(
     show_dart,
     show_news,
     dart_api_key,
+    data_source_preference="auto",
 ):
     if not st.session_state.analysis_started:
         st.markdown(
@@ -3517,7 +4023,7 @@ def render_single_stock_analysis(
         return
 
     with st.spinner("일봉 데이터를 가져오고 기술적 지표를 계산하는 중입니다..."):
-        daily_df = get_daily_data(normalized_ticker, period_map[period_option])
+        daily_df = get_daily_data(normalized_ticker, period_map[period_option], data_source_preference)
 
     if daily_df.empty:
         st.error("주가 데이터를 가져오지 못했습니다. 자산명, 코드, 데이터 제공 상태를 확인하세요.")
@@ -3545,7 +4051,7 @@ def render_single_stock_analysis(
     st.subheader(f"{asset_meta.get('name', normalized_ticker)} 분석 요약")
     st.caption(f"입력값: {asset_ref['input']} · 분석 코드: {normalized_ticker}")
     render_asset_profile(asset_meta)
-    render_data_reference_box(analyzed_df, normalized_ticker, period_option, show_intraday, intraday_interval)
+    render_data_reference_box(daily_df, normalized_ticker, period_option, show_intraday, intraday_interval)
 
     summary_col, gauge_col = st.columns([2, 1])
     with summary_col:
@@ -3596,7 +4102,7 @@ def render_single_stock_analysis(
         with intraday_tab:
             if show_intraday:
                 with st.spinner("분봉 데이터를 가져오는 중입니다..."):
-                    intraday_df = get_intraday_data(normalized_ticker, intraday_interval)
+                    intraday_df = get_intraday_data(normalized_ticker, intraday_interval, data_source_preference)
 
                 if intraday_df.empty:
                     st.info("분봉 데이터를 가져오지 못했습니다. yfinance 제공 상태나 장 운영 시간을 확인하세요.")
@@ -3681,7 +4187,7 @@ def render_hero():
             </p>
             <div class="notice-row">
                 <div class="notice">본 대시보드는 기술적 조건과 참고 정보를 정리하는 개인용 판단 보조 도구이며, 특정 자산의 거래 지시나 성과 보장을 목적으로 하지 않습니다.</div>
-                <div class="notice">yfinance 데이터는 실제 증권사/거래소 데이터와 차이가 있을 수 있으며, 분봉 데이터는 실시간 시세가 아니라 지연될 수 있습니다.</div>
+                <div class="notice">가격 데이터는 설정된 데이터 소스 기준으로 조회하며, KIS 미지원/실패 시 yfinance 참고 데이터로 보완될 수 있습니다. 분봉 데이터는 지연되거나 일부 누락될 수 있습니다.</div>
             </div>
         </div>
         """,
@@ -3698,11 +4204,21 @@ def main():
 
     dart_api_key = get_dart_api_key()
     dart_available = bool(dart_api_key)
+    configured_data_source = get_configured_data_source()
     period_map = {"3개월": "3mo", "6개월": "6mo", "1년": "1y", "2년": "2y", "5년": "5y"}
 
     with st.sidebar:
         st.header("분석 설정")
         ticker = st.text_input("자산명 또는 코드를 입력하세요", value="삼성전자", help="예: 삼성전자, 005930, 애플, AAPL, SPY, TQQQ, SQQQ")
+        data_source_preference = st.selectbox(
+            "가격 데이터 출처",
+            list(DATA_SOURCE_OPTIONS.keys()),
+            format_func=lambda key: DATA_SOURCE_OPTIONS[key],
+            index=list(DATA_SOURCE_OPTIONS.keys()).index(configured_data_source),
+            help="KIS는 한국투자증권 Open API입니다. 국내 주식/ETF부터 우선 적용하고, 실패하거나 미지원 자산은 yfinance로 보완합니다.",
+        )
+        source_label, source_comment = get_data_source_status(data_source_preference)
+        st.caption(f"데이터 출처 설정: {source_label} · {source_comment}")
         period_option = st.selectbox("일봉 분석 기간", ["3개월", "6개월", "1년", "2년", "5년"], index=2)
         show_intraday = st.checkbox("분봉 참고 차트 표시", value=True)
         intraday_interval = st.selectbox("분봉 간격", ["1m", "5m", "15m", "30m", "60m"], index=1)
@@ -3742,10 +4258,11 @@ def main():
             show_dart=show_dart,
             show_news=show_news,
             dart_api_key=dart_api_key,
+            data_source_preference=data_source_preference,
         )
 
     with scanner_tab:
-        render_watchlist_scanner(dart_api_key)
+        render_watchlist_scanner(dart_api_key, data_source_preference)
 
     with indicator_guide_tab:
         render_indicator_guide()
