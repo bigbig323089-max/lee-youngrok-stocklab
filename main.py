@@ -7,6 +7,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -3496,6 +3497,41 @@ def classify_watchlist_candidate(row):
     return "관망 후보"
 
 
+def build_watchlist_failure_row(ticker, error):
+    asset_ref = ticker if isinstance(ticker, dict) else resolve_asset_input(ticker)
+    normalized_ticker = asset_ref.get("ticker", str(ticker))
+    asset_meta = infer_asset_meta(normalized_ticker)
+
+    if asset_ref.get("name"):
+        asset_meta["name"] = asset_ref["name"]
+
+    return {
+        "자산명": asset_meta.get("name", normalized_ticker),
+        "분석 코드": normalized_ticker,
+        "자산 유형": asset_meta["asset_type"],
+        "일봉 기술 점수": np.nan,
+        "일봉 보조 판단": "조회 실패",
+        "1개월 스윙 조건 충족도": np.nan,
+        "스윙 참고 신호": "조회 실패",
+        "1개월 수익률": np.nan,
+        "최근 5거래일 수익률": np.nan,
+        "과열/눌림 참고": "조회 실패",
+        "구조적 위험 참고": ", ".join(asset_meta.get("risk_badges", [])) if asset_meta.get("risk_badges") else "-",
+        "당일 흐름 점수": np.nan,
+        "당일 흐름 판단": "조회 실패",
+        "RSI": np.nan,
+        "MACD 상태": "조회 실패",
+        "거래량 상태": "조회 실패",
+        "변동성 리스크": "조회 실패",
+        "데이터 출처": "-",
+        "데이터 품질": "조회 실패",
+        "DART 공시 여부": "확인 실패" if get_stock_code(normalized_ticker) else "해당 없음",
+        "점검 유형": "조회 실패",
+        "종합 점검 점수": 1,
+        "오류": str(error),
+    }
+
+
 def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_key, data_source_preference="auto"):
     asset_ref = ticker if isinstance(ticker, dict) else resolve_asset_input(ticker)
     normalized_ticker = asset_ref["ticker"]
@@ -3560,35 +3596,11 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
 
         return row
     except Exception as error:
-        return {
-            "자산명": asset_meta.get("name", normalized_ticker),
-            "분석 코드": normalized_ticker,
-            "자산 유형": asset_meta["asset_type"],
-            "일봉 기술 점수": np.nan,
-            "일봉 보조 판단": "분석 실패",
-            "1개월 스윙 조건 충족도": np.nan,
-            "스윙 참고 신호": "분석 실패",
-            "1개월 수익률": np.nan,
-            "최근 5거래일 수익률": np.nan,
-            "과열/눌림 참고": "분석 실패",
-            "구조적 위험 참고": ", ".join(asset_meta.get("risk_badges", [])) if asset_meta.get("risk_badges") else "-",
-            "당일 흐름 점수": np.nan,
-            "당일 흐름 판단": "분석 실패",
-            "RSI": np.nan,
-            "MACD 상태": "분석 실패",
-            "거래량 상태": "분석 실패",
-            "변동성 리스크": "분석 실패",
-            "데이터 출처": "-",
-            "데이터 품질": "조회 실패",
-            "DART 공시 여부": "확인 실패" if get_stock_code(normalized_ticker) else "해당 없음",
-            "점검 유형": "분석 실패",
-            "종합 점검 점수": 1,
-            "오류": str(error),
-        }
+        return build_watchlist_failure_row(asset_ref, error)
 
 
 def render_watchlist_priority_cards(result_df):
-    valid_df = result_df[result_df["점검 유형"] != "분석 실패"].head(5)
+    valid_df = result_df[~result_df["점검 유형"].isin(["분석 실패", "조회 실패"])].head(5)
 
     if valid_df.empty:
         return
@@ -3649,20 +3661,40 @@ def render_watchlist_scanner(dart_api_key, data_source_preference="auto"):
             if overflow_count > 0:
                 st.info(f"최대 {WATCHLIST_MAX_COUNT}개까지만 분석합니다. 초과 입력된 {overflow_count}개 종목은 이번 분석에서 제외했습니다.")
 
-            rows = []
-            progress = st.progress(0, text="관심자산을 분석하는 중입니다...")
-
-            for index, asset_ref in enumerate(assets, start=1):
-                rows.append(
-                    analyze_watchlist_ticker(
+            def fetch_and_score_single(asset_ref):
+                """단일 자산 데이터 조회와 점수 계산을 수행하고, 예외는 실패 row로 변환합니다."""
+                try:
+                    return analyze_watchlist_ticker(
                         asset_ref,
                         period_map[scanner_period_option],
                         scanner_interval,
                         dart_api_key,
                         data_source_preference,
                     )
-                )
-                progress.progress(index / len(assets), text=f"{asset_ref['name']} 분석 중 ({index}/{len(assets)})")
+                except Exception as error:
+                    return build_watchlist_failure_row(asset_ref, error)
+
+            rows = []
+            progress = st.progress(0, text="관심자산을 병렬로 분석하는 중입니다...")
+
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = {executor.submit(fetch_and_score_single, asset_ref): asset_ref for asset_ref in assets}
+
+                for index, future in enumerate(as_completed(futures), start=1):
+                    asset_ref = futures[future]
+                    try:
+                        row = future.result()
+                    except Exception as error:
+                        row = build_watchlist_failure_row(asset_ref, error)
+
+                    if row is None:
+                        row = build_watchlist_failure_row(asset_ref, "조회 결과가 비어 있습니다.")
+
+                    rows.append(row)
+                    progress.progress(
+                        index / len(assets),
+                        text=f"관심자산 분석 중 ({index}/{len(assets)})",
+                    )
 
             progress.empty()
             result_df = pd.DataFrame(rows)
