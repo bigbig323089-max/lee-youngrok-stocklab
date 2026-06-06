@@ -400,6 +400,12 @@ def load_custom_css():
                 --shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
             }
 
+            html, body, [class*="css"], .stApp {
+                font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+                -webkit-font-smoothing: antialiased;
+                text-rendering: optimizeLegibility;
+            }
+
             .stApp {
                 background:
                     radial-gradient(circle at 16% 0%, rgba(37, 99, 235, 0.10), transparent 34rem),
@@ -753,6 +759,151 @@ def load_custom_css():
                 color: #334155;
             }
 
+
+            .score-panel {
+                background: rgba(255, 255, 255, 0.96);
+                border: 1px solid var(--line);
+                border-radius: 16px;
+                padding: 18px 20px 16px 20px;
+                box-shadow: 0 14px 34px rgba(15, 23, 42, 0.07);
+                margin: 12px 0 14px 0;
+            }
+
+            .score-panel-head {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 16px;
+                margin-bottom: 15px;
+            }
+
+            .score-title {
+                color: var(--muted);
+                font-size: 0.8rem;
+                font-weight: 900;
+                margin-bottom: 3px;
+            }
+
+            .score-value {
+                color: #1d4ed8;
+                font-size: clamp(2.1rem, 4.2vw, 3.25rem);
+                font-weight: 950;
+                letter-spacing: -0.02em;
+                line-height: 1;
+                white-space: nowrap;
+            }
+
+            .score-value span {
+                color: var(--muted);
+                font-size: clamp(1rem, 1.6vw, 1.22rem);
+                font-weight: 900;
+                margin-left: 4px;
+            }
+
+            .score-panel-sub {
+                color: var(--muted);
+                font-size: 0.82rem;
+                line-height: 1.45;
+                margin-top: 8px;
+            }
+
+            .score-track-wrap {
+                margin-top: 6px;
+            }
+
+            .score-track {
+                position: relative;
+                height: 16px;
+                border-radius: 999px;
+                background: linear-gradient(
+                    90deg,
+                    #ffe4e6 0%, #ffe4e6 19%,
+                    #ffedd5 19%, #ffedd5 39%,
+                    #fef3c7 39%, #fef3c7 60%,
+                    #dbeafe 60%, #dbeafe 80%,
+                    #bfdbfe 80%, #bfdbfe 100%
+                );
+                border: 1px solid rgba(148, 163, 184, 0.45);
+                overflow: visible;
+            }
+
+            .score-fill {
+                position: absolute;
+                left: 0;
+                top: 0;
+                height: 100%;
+                border-radius: 999px;
+                background: linear-gradient(90deg, rgba(37, 99, 235, 0.55), rgba(96, 165, 250, 0.72));
+                box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42);
+            }
+
+            .score-marker {
+                position: absolute;
+                top: -5px;
+                width: 3px;
+                height: 26px;
+                border-radius: 999px;
+                background: #0f172a;
+                box-shadow: 0 2px 6px rgba(15, 23, 42, 0.20);
+            }
+
+            .score-scale {
+                display: flex;
+                justify-content: space-between;
+                color: var(--muted);
+                font-size: 0.72rem;
+                margin-top: 7px;
+                font-weight: 700;
+            }
+
+            .score-band-labels {
+                display: grid;
+                grid-template-columns: repeat(5, 1fr);
+                gap: 6px;
+                margin-top: 10px;
+            }
+
+            .score-band-labels span {
+                border: 1px solid var(--line);
+                background: #f8fafc;
+                border-radius: 999px;
+                color: #475569;
+                font-size: 0.68rem;
+                font-weight: 800;
+                padding: 5px 5px;
+                text-align: center;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .score-note-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                align-items: center;
+                margin-top: 12px;
+                color: var(--muted);
+                font-size: 0.8rem;
+                line-height: 1.45;
+            }
+
+            .score-note-pill {
+                display: inline-flex;
+                align-items: center;
+                border-radius: 999px;
+                padding: 5px 9px;
+                background: #eff6ff;
+                color: #1e40af;
+                border: 1px solid #bfdbfe;
+                font-weight: 900;
+                white-space: nowrap;
+            }
+
+            .metric-grid-secondary {
+                grid-template-columns: repeat(auto-fit, minmax(164px, 1fr));
+            }
+
             @media (max-width: 900px) {
                 .notice-row {
                     grid-template-columns: 1fr;
@@ -761,6 +912,16 @@ def load_custom_css():
                 .metric-grid {
                     grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
                 }
+
+                .score-panel {
+                    padding: 16px 15px;
+                }
+
+                .score-panel-head {
+                    flex-direction: column;
+                    gap: 10px;
+                }
+
 
                 .metric-card.metric-primary {
                     grid-column: span 1;
@@ -2249,7 +2410,7 @@ def apply_chart_theme(fig):
         template="plotly_white",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#ffffff",
-        font=dict(family="Arial, sans-serif", color="#111827"),
+        font=dict(family='"Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif', color="#111827"),
         title_font=dict(size=18, color="#111827"),
         legend=dict(
             orientation="h",
@@ -2851,19 +3012,55 @@ def get_yfinance_news(ticker):
     return pd.DataFrame(rows)
 
 
+def render_score_panel(signal_result):
+    score = clamp_score_100(signal_result.get("technical_score", 0))
+    badge_class = get_signal_badge_class(score)
+    signal_text = html.escape(str(signal_result.get("signal", "관망/확인 구간")))
+    risk_level = html.escape(str(signal_result.get("risk_level", "확인 필요")))
+    risk_comment = html.escape(str(signal_result.get("risk_comment", "가격 변동성과 조건 충족도를 함께 확인하세요.")))
+
+    st.markdown(
+        f"""
+        <div class="score-panel">
+            <div class="score-panel-head">
+                <div>
+                    <div class="score-title">기술 조건 충족도</div>
+                    <div class="score-value">{score}<span>&nbsp;/ 100</span></div>
+                    <div class="score-panel-sub">수익 확률이 아니라 이동평균, 모멘텀, 거래량, 변동성 조건의 충족 정도입니다.</div>
+                </div>
+                <div>
+                    <div class="score-title">보조 판단</div>
+                    <span class="signal-badge {badge_class}">{signal_text}</span>
+                </div>
+            </div>
+            <div class="score-track-wrap">
+                <div class="score-track">
+                    <div class="score-fill" style="width: {score}%;"></div>
+                    <div class="score-marker" style="left: calc({score}% - 1.5px);"></div>
+                </div>
+                <div class="score-scale">
+                    <span>0</span><span>20</span><span>40</span><span>60</span><span>80</span><span>100</span>
+                </div>
+                <div class="score-band-labels">
+                    <span>강한 약세 주의</span>
+                    <span>약세 주의</span>
+                    <span>관망/확인</span>
+                    <span>상승 관심</span>
+                    <span>상승 관심 강함</span>
+                </div>
+            </div>
+            <div class="score-note-row">
+                <span class="score-note-pill">변동성 리스크: {risk_level}</span>
+                <span>{risk_comment}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_metric_summary(latest, signal_result):
-    badge_class = get_signal_badge_class(signal_result["technical_score"])
     cards = [
-        (
-            "기술 조건 충족도",
-            f"{signal_result['technical_score']} / 100",
-            "종합 조건 충족도",
-        ),
-        (
-            "보조 판단",
-            f"<span class='signal-badge {badge_class}'>{signal_result['signal']}</span>",
-            "기술적 조건 기준",
-        ),
         ("최근 종가", format_price(latest["Close"]), "일봉 Close 기준"),
         ("최근 거래량", f"{int(latest['Volume']):,}", "Volume"),
         ("RSI", f"{latest['RSI']:.2f}", "과열/침체"),
@@ -2872,15 +3069,10 @@ def render_metric_summary(latest, signal_result):
         ("ATR 비율", format_percent(latest["ATR_Ratio"]), "변동성 리스크"),
     ]
 
-    card_html = "<div class='metric-grid'>"
-    for index, (label, value, sub) in enumerate(cards):
-        class_name = "metric-card"
-        if index == 0:
-            class_name += " metric-primary"
-        elif index == 1:
-            class_name += " metric-signal"
+    card_html = "<div class='metric-grid metric-grid-secondary'>"
+    for label, value, sub in cards:
         card_html += (
-            f"<div class='{class_name}'>"
+            "<div class='metric-card'>"
             f"<div class='label'>{label}</div>"
             f"<div class='value'>{value}</div>"
             f"<div class='sub'>{sub}</div>"
@@ -2902,29 +3094,29 @@ def render_metric_summary(latest, signal_result):
 
 def get_data_quality_status(df):
     if df is None or df.empty:
-        return "조회 실패", "가격 데이터가 비어 있습니다."
+        return "데이터 없음", "가격 데이터를 가져오지 못했습니다."
 
-    issues = []
     required = ["Open", "High", "Low", "Close", "Volume"]
-
     missing_columns = [column for column in required if column not in df.columns]
     if missing_columns:
-        issues.append(f"필수 컬럼 누락: {', '.join(missing_columns)}")
+        return "일부 컬럼 누락", f"{', '.join(missing_columns)} 항목이 없어 일부 지표가 제한될 수 있습니다."
 
-    if "Close" in df.columns and df["Close"].dropna().empty:
-        issues.append("종가 데이터 없음")
+    valid_df = df.dropna(subset=required)
+    if valid_df.empty:
+        return "데이터 부족", "OHLCV 값이 부족해 지표 계산이 제한됩니다."
 
-    if df.index.has_duplicates:
-        issues.append("중복 날짜 존재")
+    missing_ratio = 1 - (len(valid_df) / max(len(df), 1))
+    if missing_ratio > 0.15:
+        return "누락 주의", "일부 OHLCV 데이터가 누락되어 해석에 주의가 필요합니다."
 
-    if len(df) < 60:
-        issues.append("60일 지표 계산에는 데이터가 짧음")
+    if len(valid_df) < 60:
+        return "데이터 짧음", "장기 이동평균선 해석에 필요한 기간이 부족할 수 있습니다."
 
-    if issues:
-        return "확인 필요", " / ".join(issues)
+    latest = valid_df.iloc[-1]
+    if any(pd.isna(latest[column]) for column in required):
+        return "최신값 확인 필요", "최근 거래일의 일부 가격 또는 거래량 값이 비어 있습니다."
 
     return "정상", "OHLCV 데이터가 정상적으로 정리되었습니다."
-
 
 def render_data_reference_box(df, ticker, period_option, show_intraday, intraday_interval):
     valid_df = df.dropna(subset=["Close"]) if df is not None and "Close" in df.columns else pd.DataFrame()
@@ -4307,11 +4499,8 @@ def render_single_stock_analysis(
     render_asset_profile(asset_meta)
     render_data_reference_box(daily_df, normalized_ticker, period_option, show_intraday, intraday_interval)
 
-    summary_col, gauge_col = st.columns([2, 1])
-    with summary_col:
-        render_metric_summary(latest, signal_result)
-    with gauge_col:
-        st.plotly_chart(create_score_gauge(signal_result["technical_score"]), use_container_width=True)
+    render_score_panel(signal_result)
+    render_metric_summary(latest, signal_result)
 
     st.subheader("조건 판단 근거")
     for reason in signal_result["reasons"]:
