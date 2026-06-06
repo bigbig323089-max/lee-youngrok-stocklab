@@ -612,6 +612,11 @@ def load_custom_css():
                 color: #991b1b;
             }
 
+            .signal-muted {
+                background: #f3f4f6;
+                color: #4b5563;
+            }
+
             .basis-card {
                 background: #ffffff;
                 border: 1px solid var(--line);
@@ -2868,6 +2873,48 @@ def render_data_reference_box(df, ticker, period_option, show_intraday, intraday
     )
 
 
+def render_data_source_badge(df):
+    """
+    df.attrs["data_source"] 값을 읽어 색상 배지로 표시.
+    - "한국투자 KIS Open API" → 초록 배지
+    - "yfinance" 포함 → 노란 배지 + "(참고 데이터, 지연 가능)" 문구
+    - 출처 불명 → 회색 배지
+    배지 아래에 df.attrs["fallback_reason"]이 있으면 작은 글씨로 보여줄 것
+    """
+    data_source = df.attrs.get("data_source", "") if df is not None else ""
+    fallback_reason = df.attrs.get("fallback_reason", "") if df is not None else ""
+    source_text = str(data_source or "출처 불명")
+    source_lower = source_text.lower()
+
+    if source_text == "한국투자 KIS Open API":
+        badge_class = "signal-good"
+        badge_text = "✅ 한국투자 KIS Open API"
+    elif "yfinance" in source_lower:
+        badge_class = "signal-neutral"
+        badge_text = "⚠️ yfinance 참고 데이터 (지연 가능, 증권사 데이터와 다를 수 있음)"
+    else:
+        badge_class = "signal-muted"
+        badge_text = "출처 불명"
+
+    fallback_html = ""
+    if fallback_reason:
+        fallback_html = (
+            f"<div class='sub' style='margin-top: 6px;'>"
+            f"{html.escape(str(fallback_reason))}"
+            f"</div>"
+        )
+
+    st.markdown(
+        f"""
+        <div style="margin: 4px 0 10px 0;">
+            <span class="signal-badge {badge_class}">{html.escape(badge_text)}</span>
+            {fallback_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def format_direction(direction):
     if direction == "inverse":
         return "인버스"
@@ -4145,8 +4192,10 @@ def render_single_stock_analysis(
         )
 
         with price_tab:
+            render_data_source_badge(analyzed_df)
             st.plotly_chart(create_price_chart(analyzed_df, signal_history), use_container_width=True)
         with swing_tab:
+            render_data_source_badge(swing_analyzed_df)
             st.plotly_chart(create_swing_chart(swing_analyzed_df), use_container_width=True)
             st.caption("1개월 스윙 차트는 최근 약 20거래일 흐름을 중심으로 단기 추세, 고저점 위치, 이동평균 흐름을 참고합니다.")
         with volume_tab:
@@ -4170,6 +4219,7 @@ def render_single_stock_analysis(
                     intraday_analyzed_df = calculate_intraday_indicators(intraday_df)
                     intraday_result = calculate_intraday_signal(intraday_analyzed_df, intraday_interval)
                     render_intraday_summary(intraday_analyzed_df, intraday_result)
+                    render_data_source_badge(intraday_analyzed_df)
                     st.plotly_chart(create_intraday_chart(intraday_analyzed_df), use_container_width=True)
                     st.caption("분봉 데이터는 실시간 시세가 아니며 지연되거나 일부 누락될 수 있습니다.")
             else:
