@@ -2915,6 +2915,36 @@ def render_data_source_badge(df):
     )
 
 
+def render_global_disclaimer_banner():
+    first_view = not st.session_state.get("disclaimer_banner_seen", False)
+
+    with st.expander("📌 이 앱 사용 전 확인하세요 (면책 안내)", expanded=first_view):
+        st.markdown(
+            """
+            <div style="
+                background: #fffbeb;
+                border: 1px solid #fbbf24;
+                border-radius: 12px;
+                padding: 12px 14px;
+                font-size: 0.88rem;
+                line-height: 1.7;
+                color: #374151;
+            ">
+                <b>⚠️ 면책 안내</b><br>
+                이 앱은 기술적 분석 조건 충족 여부를 점수로 요약하는 개인용 판단 보조 도구입니다.<br>
+                표시되는 점수는 기술 조건 충족 개수의 합산이며, 수익 확률·매수·매도 추천이 아닙니다.<br>
+                KIS 미지원 자산과 미국 주식은 yfinance 참고 데이터로 조회되며 실제 시세와 차이가 있을 수 있습니다.<br>
+                레버리지·인버스 ETF는 구조적 위험이 크므로 반드시 별도로 확인하세요.<br>
+                모든 투자 판단과 그에 따른 결과는 본인에게 있습니다.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    if first_view:
+        st.session_state.disclaimer_banner_seen = True
+
+
 def format_direction(direction):
     if direction == "inverse":
         return "인버스"
@@ -4310,6 +4340,7 @@ def main():
         st.session_state.analysis_started = False
 
     load_custom_css()
+    render_global_disclaimer_banner()
     render_hero()
 
     dart_api_key = get_dart_api_key()
