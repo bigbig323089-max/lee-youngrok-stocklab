@@ -2210,6 +2210,8 @@ def create_score_gauge(score):
         go.Indicator(
             mode="gauge+number",
             value=score,
+            title={"text": ""},
+            domain={"x": [0, 1], "y": [0, 1]},
             number={"suffix": "점"},
             gauge={
                 "axis": {"range": [1, 10]},
@@ -2224,8 +2226,14 @@ def create_score_gauge(score):
             },
         )
     )
-    fig.update_layout(height=260, margin=dict(l=20, r=20, t=40, b=20))
-    return apply_chart_theme(fig)
+    fig = apply_chart_theme(fig)
+    fig.update_layout(
+        title={"text": ""},
+        height=260,
+        margin=dict(l=12, r=12, t=12, b=12),
+        showlegend=False,
+    )
+    return fig
 
 
 def create_price_chart(df, signal_history=None):
@@ -2853,7 +2861,7 @@ def render_data_reference_box(df, ticker, period_option, show_intraday, intraday
             <b>가격 기준:</b> OHLCV의 Close 기준, KIS는 원주가 기준, yfinance는 auto_adjust=False 기준<br>
             <b>최근 거래량:</b> {latest_volume}<br>
             <b>데이터 품질:</b> {html.escape(quality_status)} - {html.escape(quality_comment)}<br>
-            <b>주의:</b> yfinance 데이터는 실제 증권사/거래소 데이터와 차이가 있을 수 있고, 분봉 데이터는 지연되거나 일부 누락될 수 있습니다.
+            <b>주의:</b> 가격 데이터는 선택한 출처와 실제 증권사/거래소 화면 간 차이가 있을 수 있고, 분봉 데이터는 지연되거나 일부 누락될 수 있습니다.
         </div>
         """,
         unsafe_allow_html=True,
@@ -2885,7 +2893,7 @@ def render_asset_profile(asset_meta):
     )
     cards = [
         ("자산명", asset_meta.get("name", asset_meta.get("ticker", "-")), "메타데이터 기준"),
-        ("분석 코드", asset_meta.get("ticker", "-"), "yfinance 조회 코드"),
+        ("분석 코드", asset_meta.get("ticker", "-"), "가격 조회 코드"),
         ("자산 유형", asset_meta.get("asset_type", "분류 불명"), "분류 기준"),
         ("방향", format_direction(asset_meta.get("direction", "long")), "가격 흐름 해석 기준"),
         ("배율", format_leverage_factor(asset_meta.get("leverage_factor", 1)), "상품 구조 참고"),
