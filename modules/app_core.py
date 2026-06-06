@@ -386,114 +386,173 @@ def load_custom_css():
             :root {
                 --bg: #f6f8fb;
                 --panel: #ffffff;
-                --line: #e5e7eb;
-                --text: #111827;
-                --muted: #6b7280;
+                --panel-soft: #f8fafc;
+                --line: #e2e8f0;
+                --line-strong: #cbd5e1;
+                --text: #0f172a;
+                --muted: #64748b;
                 --blue: #2563eb;
-                --green: #16a34a;
-                --red: #dc2626;
-                --amber: #d97706;
+                --blue-soft: #dbeafe;
+                --amber: #f59e0b;
+                --amber-soft: #fef3c7;
+                --rose: #e11d48;
+                --rose-soft: #ffe4e6;
+                --shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
             }
 
             .stApp {
                 background:
-                    radial-gradient(circle at top left, rgba(37, 99, 235, 0.10), transparent 32rem),
-                    linear-gradient(180deg, #f8fafc 0%, var(--bg) 100%);
+                    radial-gradient(circle at 16% 0%, rgba(37, 99, 235, 0.10), transparent 34rem),
+                    linear-gradient(180deg, #fbfdff 0%, var(--bg) 100%);
                 color: var(--text);
             }
 
             .block-container {
-                max-width: 1360px;
-                padding-top: 1.7rem;
+                max-width: 1380px;
+                padding-top: 1.15rem;
                 padding-bottom: 3rem;
             }
 
+            h1, h2, h3 {
+                color: var(--text);
+                letter-spacing: 0;
+            }
+
+            div[data-testid="stMarkdownContainer"] p {
+                color: #334155;
+                line-height: 1.65;
+            }
+
             section[data-testid="stSidebar"] {
-                background: #ffffff;
+                background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
                 border-right: 1px solid var(--line);
             }
 
             section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
-                gap: 0.75rem;
+                gap: 0.82rem;
             }
 
-            .hero {
-                background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 55%, #2563eb 100%);
-                border-radius: 18px;
-                padding: 28px 30px;
-                color: #ffffff;
-                box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
-                margin-bottom: 22px;
+            section[data-testid="stSidebar"] h1,
+            section[data-testid="stSidebar"] h2,
+            section[data-testid="stSidebar"] h3 {
+                color: var(--text);
             }
 
-            .hero .eyebrow {
-                font-size: 0.82rem;
-                letter-spacing: 0.08em;
-                opacity: 0.78;
-                margin-bottom: 8px;
+            section[data-testid="stSidebar"] label {
+                color: #334155 !important;
                 font-weight: 700;
             }
 
-            .hero h1 {
-                margin: 0 0 10px 0;
-                font-size: 2rem;
-                line-height: 1.25;
+            .hero {
+                background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 58%, #2563eb 100%);
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                border-radius: 16px;
+                padding: 22px 26px;
+                color: #ffffff;
+                box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14);
+                margin-bottom: 18px;
+            }
+
+            .hero .eyebrow {
+                display: inline-flex;
+                align-items: center;
+                border: 1px solid rgba(255, 255, 255, 0.22);
+                background: rgba(255, 255, 255, 0.10);
+                border-radius: 999px;
+                padding: 5px 10px;
+                font-size: 0.75rem;
+                letter-spacing: 0.04em;
+                opacity: 0.92;
+                margin-bottom: 10px;
                 font-weight: 800;
+            }
+
+            .hero h1 {
+                margin: 0 0 8px 0;
+                font-size: clamp(1.8rem, 3vw, 2.45rem);
+                line-height: 1.18;
+                font-weight: 900;
             }
 
             .hero p {
                 margin: 0;
-                color: rgba(255, 255, 255, 0.86);
-                line-height: 1.65;
+                color: rgba(255, 255, 255, 0.88);
+                line-height: 1.58;
                 max-width: 920px;
+                font-size: 0.98rem;
             }
 
             .notice-row {
                 display: grid;
                 grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 12px;
-                margin-top: 18px;
+                gap: 10px;
+                margin-top: 14px;
             }
 
             .notice {
                 border: 1px solid rgba(255, 255, 255, 0.18);
                 background: rgba(255, 255, 255, 0.10);
                 border-radius: 12px;
-                padding: 12px 14px;
+                padding: 11px 13px;
                 color: rgba(255, 255, 255, 0.92);
-                font-size: 0.94rem;
+                font-size: 0.9rem;
                 line-height: 1.5;
             }
 
             .metric-grid {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-                gap: 10px;
-                margin-bottom: 10px;
+                grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
+                gap: 11px;
+                margin-bottom: 12px;
             }
 
             .metric-card {
+                position: relative;
                 background: var(--panel);
                 border: 1px solid var(--line);
                 border-radius: 12px;
-                padding: 12px 13px;
-                box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+                padding: 13px 14px;
+                box-shadow: var(--shadow);
                 min-height: 82px;
                 text-align: left;
                 overflow: hidden;
             }
 
+            .metric-card::after {
+                content: "";
+                position: absolute;
+                left: 0;
+                right: 0;
+                top: 0;
+                height: 3px;
+                background: transparent;
+            }
+
+            .metric-card.metric-primary {
+                grid-column: span 2;
+                background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+                border-color: #bfdbfe;
+            }
+
+            .metric-card.metric-primary::after {
+                background: linear-gradient(90deg, var(--blue), #60a5fa);
+            }
+
+            .metric-card.metric-signal {
+                background: linear-gradient(180deg, #ffffff 0%, #fffbeb 100%);
+            }
+
             .metric-card .label {
-                font-size: 0.78rem;
+                font-size: 0.76rem;
                 color: var(--muted);
-                font-weight: 700;
+                font-weight: 800;
                 margin-bottom: 6px;
                 white-space: nowrap;
             }
 
             .metric-card .value {
-                font-size: clamp(1.18rem, 1.7vw, 1.48rem);
-                font-weight: 800;
+                font-size: clamp(1.16rem, 1.7vw, 1.5rem);
+                font-weight: 900;
                 color: var(--text);
                 line-height: 1.18;
                 white-space: nowrap;
@@ -501,11 +560,16 @@ def load_custom_css():
                 text-overflow: ellipsis;
             }
 
+            .metric-card.metric-primary .value {
+                font-size: clamp(1.55rem, 2.8vw, 2.15rem);
+                color: #1d4ed8;
+            }
+
             .metric-card .sub {
-                margin-top: 5px;
-                font-size: 0.75rem;
+                margin-top: 6px;
+                font-size: 0.74rem;
                 color: var(--muted);
-                line-height: 1.25;
+                line-height: 1.28;
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
@@ -516,41 +580,47 @@ def load_custom_css():
                 align-items: center;
                 border-radius: 999px;
                 padding: 7px 11px;
-                font-weight: 800;
-                font-size: 0.92rem;
+                font-weight: 900;
+                font-size: 0.9rem;
                 white-space: nowrap;
+                border: 1px solid transparent;
             }
 
             .signal-good {
-                background: #dcfce7;
-                color: #166534;
+                background: var(--blue-soft);
+                color: #1d4ed8;
+                border-color: #bfdbfe;
             }
 
             .signal-neutral {
-                background: #fef9c3;
-                color: #854d0e;
+                background: var(--amber-soft);
+                color: #92400e;
+                border-color: #fde68a;
             }
 
             .signal-bad {
-                background: #fee2e2;
-                color: #991b1b;
+                background: var(--rose-soft);
+                color: #be123c;
+                border-color: #fecdd3;
             }
 
             .signal-muted {
-                background: #f3f4f6;
-                color: #4b5563;
+                background: #f1f5f9;
+                color: #475569;
+                border-color: #e2e8f0;
             }
 
             .basis-card {
-                background: #ffffff;
+                background: rgba(255, 255, 255, 0.92);
                 border: 1px solid var(--line);
+                border-left: 4px solid var(--blue);
                 border-radius: 12px;
-                padding: 10px 13px;
-                box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
-                margin: 6px 0 16px 0;
-                color: #374151;
-                line-height: 1.45;
-                font-size: 0.92rem;
+                padding: 11px 14px;
+                box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
+                margin: 8px 0 18px 0;
+                color: #334155;
+                line-height: 1.55;
+                font-size: 0.91rem;
             }
 
             .empty-guide {
@@ -558,37 +628,60 @@ def load_custom_css():
                 border: 1px solid var(--line);
                 border-radius: 16px;
                 padding: 22px 24px;
-                box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+                box-shadow: var(--shadow);
                 margin-top: 16px;
             }
 
             .empty-guide h3 {
                 margin: 0 0 8px 0;
-                font-size: 1.15rem;
+                font-size: 1.18rem;
             }
 
             .empty-guide p {
                 color: var(--muted);
                 margin: 0;
-                line-height: 1.65;
+                line-height: 1.7;
             }
 
             .stButton > button {
-                border-radius: 10px;
-                font-weight: 800;
-                min-height: 42px;
+                border-radius: 11px !important;
+                font-weight: 900 !important;
+                min-height: 43px;
+                border: 1px solid #1d4ed8 !important;
+                background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%) !important;
+                color: #ffffff !important;
+                box-shadow: 0 10px 20px rgba(37, 99, 235, 0.18);
+            }
+
+            .stButton > button:hover {
+                border-color: #1e40af !important;
+                background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%) !important;
+                box-shadow: 0 12px 24px rgba(37, 99, 235, 0.23);
             }
 
             div[data-testid="stMetric"] {
                 background: #ffffff;
                 border: 1px solid var(--line);
-                border-radius: 14px;
+                border-radius: 12px;
                 padding: 14px 16px;
-                box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
+                box-shadow: var(--shadow);
             }
 
             div[data-testid="stTabs"] button {
-                font-weight: 800;
+                font-weight: 900;
+                color: #334155;
+            }
+
+            div[data-testid="stTabs"] button[aria-selected="true"] {
+                color: var(--blue);
+            }
+
+            div[data-testid="stExpander"] {
+                border: 1px solid var(--line);
+                border-radius: 12px;
+                background: #ffffff;
+                box-shadow: 0 8px 22px rgba(15, 23, 42, 0.035);
+                overflow: hidden;
             }
 
             div[data-testid="stDataFrame"] {
@@ -596,65 +689,100 @@ def load_custom_css():
                 border-radius: 12px;
                 overflow: hidden;
                 box-shadow: 0 10px 26px rgba(15, 23, 42, 0.04);
+                margin-top: 0.35rem;
+            }
+
+            div[data-testid="stPlotlyChart"] {
+                background: #ffffff;
+                border: 1px solid var(--line);
+                border-radius: 14px;
+                padding: 8px;
+                box-shadow: 0 10px 26px rgba(15, 23, 42, 0.045);
             }
 
             .candidate-grid {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
                 gap: 12px;
-                margin: 8px 0 18px 0;
+                margin: 10px 0 20px 0;
             }
 
             .candidate-card {
-                background: #ffffff;
+                position: relative;
+                background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
                 border: 1px solid var(--line);
                 border-radius: 12px;
-                padding: 14px 15px;
-                box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-                min-height: 132px;
+                padding: 15px 16px;
+                box-shadow: var(--shadow);
+                min-height: 136px;
+                overflow: hidden;
+            }
+
+            .candidate-card::before {
+                content: "";
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 3px;
+                background: linear-gradient(90deg, var(--blue), #93c5fd);
             }
 
             .candidate-card .ticker {
-                font-size: 0.86rem;
+                font-size: 0.88rem;
                 color: var(--muted);
-                font-weight: 800;
+                font-weight: 900;
                 margin-bottom: 6px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
 
             .candidate-card .score {
-                font-size: 1.55rem;
-                line-height: 1.2;
-                font-weight: 900;
-                color: var(--text);
+                font-size: 1.6rem;
+                line-height: 1.18;
+                font-weight: 950;
+                color: #1d4ed8;
                 margin-bottom: 8px;
                 white-space: nowrap;
             }
 
             .candidate-card .meta {
                 font-size: 0.82rem;
-                line-height: 1.5;
-                color: #374151;
+                line-height: 1.52;
+                color: #334155;
             }
 
             @media (max-width: 900px) {
-                .notice-row,
+                .notice-row {
+                    grid-template-columns: 1fr;
+                }
+
                 .metric-grid {
-                    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+                }
+
+                .metric-card.metric-primary {
+                    grid-column: span 1;
                 }
 
                 .hero {
-                    padding: 22px 20px;
+                    padding: 20px 18px;
+                    border-radius: 14px;
                 }
 
                 .hero h1 {
-                    font-size: 1.55rem;
+                    font-size: 1.65rem;
+                }
+
+                .candidate-grid {
+                    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
                 }
             }
         </style>
         """,
         unsafe_allow_html=True,
     )
-
 
 def get_stock_code(ticker):
     normalized = normalize_ticker(ticker)
@@ -2032,7 +2160,7 @@ def build_signal_history(df):
             {
                 "Date": latest.name,
                 "Close": latest["Close"],
-                "기술적 점수": result["technical_score"],
+                "기술 조건 충족도": result["technical_score"],
                 "보조 판단": result["signal"],
             }
         )
@@ -2049,7 +2177,7 @@ def run_backtest(df, signal_history):
 
     for _, signal_row in signal_history.iterrows():
         signal = signal_row["보조 판단"]
-        technical_score = signal_row.get("기술적 점수", np.nan)
+        technical_score = signal_row.get("기술 조건 충족도", np.nan)
 
         if not is_positive_attention_condition(technical_score):
             continue
@@ -2138,35 +2266,60 @@ def apply_chart_theme(fig):
 
 
 def create_score_gauge(score):
+    score = clamp_score_100(score)
     fig = go.Figure(
         go.Indicator(
-            mode="gauge+number",
+            mode="number+gauge",
             value=score,
-            title={"text": ""},
-            domain={"x": [0, 1], "y": [0, 1]},
-            number={"suffix": "점"},
+            title={"text": "기술 조건 충족도", "font": {"size": 15, "color": "#0f172a"}},
+            domain={"x": [0, 1], "y": [0.28, 0.86]},
+            number={"suffix": " / 100", "font": {"size": 34, "color": "#0f172a"}},
             gauge={
-                "axis": {"range": [0, 100]},
-                "bar": {"color": "#2563eb"},
+                "shape": "bullet",
+                "axis": {
+                    "range": [0, 100],
+                    "tickmode": "array",
+                    "tickvals": [0, 20, 40, 60, 80, 100],
+                    "tickfont": {"size": 10, "color": "#64748b"},
+                },
+                "bar": {"color": "#2563eb", "thickness": 0.36},
+                "bgcolor": "#eef2f7",
+                "borderwidth": 0,
                 "steps": [
-                    {"range": [0, 19], "color": "#fee2e2"},
+                    {"range": [0, 19], "color": "#ffe4e6"},
                     {"range": [20, 39], "color": "#ffedd5"},
-                    {"range": [40, 60], "color": "#fef9c3"},
+                    {"range": [40, 60], "color": "#fef3c7"},
                     {"range": [61, 80], "color": "#dbeafe"},
                     {"range": [81, 100], "color": "#bfdbfe"},
                 ],
+                "threshold": {
+                    "line": {"color": "#0f172a", "width": 2},
+                    "thickness": 0.72,
+                    "value": score,
+                },
             },
         )
     )
     fig = apply_chart_theme(fig)
     fig.update_layout(
         title={"text": ""},
-        height=260,
-        margin=dict(l=12, r=12, t=12, b=12),
+        height=170,
+        margin=dict(l=18, r=18, t=18, b=30),
         showlegend=False,
+        annotations=[
+            dict(
+                text="수익 확률이 아닌 기술 조건 충족도",
+                x=0,
+                y=-0.08,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                xanchor="left",
+                font=dict(size=11, color="#64748b"),
+            )
+        ],
     )
     return fig
-
 
 def create_price_chart(df, signal_history=None):
     fig = go.Figure()
@@ -2224,8 +2377,8 @@ def create_price_chart(df, signal_history=None):
 
     if signal_history is not None and not signal_history.empty:
         history = signal_history.copy()
-        attention_signals = history[history["기술적 점수"].apply(is_positive_attention_condition)]
-        caution_signals = history[history["기술적 점수"].apply(is_negative_caution_condition)]
+        attention_signals = history[history["기술 조건 충족도"].apply(is_positive_attention_condition)]
+        caution_signals = history[history["기술 조건 충족도"].apply(is_negative_caution_condition)]
 
         if not attention_signals.empty:
             fig.add_trace(
@@ -2234,7 +2387,7 @@ def create_price_chart(df, signal_history=None):
                     y=attention_signals["Close"],
                     mode="markers",
                     name="상승 관심 조건",
-                    marker=dict(symbol="triangle-up", size=10, color="#16a34a", line=dict(width=1, color="#ffffff")),
+                    marker=dict(symbol="triangle-up", size=10, color="#2563eb", line=dict(width=1, color="#ffffff")),
                     hovertemplate="상승 관심 조건<br>%{x}<br>종가 %{y:,.2f}<extra></extra>",
                 )
             )
@@ -2246,7 +2399,7 @@ def create_price_chart(df, signal_history=None):
                     y=caution_signals["Close"],
                     mode="markers",
                     name="약세 주의 조건",
-                    marker=dict(symbol="triangle-down", size=10, color="#dc2626", line=dict(width=1, color="#ffffff")),
+                    marker=dict(symbol="triangle-down", size=10, color="#e11d48", line=dict(width=1, color="#ffffff")),
                     hovertemplate="약세 주의 조건<br>%{x}<br>종가 %{y:,.2f}<extra></extra>",
                 )
             )
@@ -2332,15 +2485,15 @@ def create_signal_history_chart(signal_history):
     fig.add_trace(
         go.Scatter(
             x=signal_history["Date"],
-            y=signal_history["기술적 점수"],
+            y=signal_history["기술 조건 충족도"],
             mode="lines+markers",
-            name="기술적 점수",
+            name="기술 조건 충족도",
         )
     )
-    fig.add_hrect(y0=7, y1=10, fillcolor="#dcfce7", opacity=0.35, line_width=0)
-    fig.add_hrect(y0=5, y1=6, fillcolor="#fef9c3", opacity=0.35, line_width=0)
-    fig.add_hrect(y0=1, y1=4, fillcolor="#fee2e2", opacity=0.35, line_width=0)
-    fig.update_layout(title="기술적 점수 히스토리", xaxis_title="날짜", yaxis_title="점수", yaxis_range=[1, 10], height=420)
+    fig.add_hrect(y0=61, y1=100, fillcolor="#dbeafe", opacity=0.38, line_width=0)
+    fig.add_hrect(y0=40, y1=60, fillcolor="#fef3c7", opacity=0.38, line_width=0)
+    fig.add_hrect(y0=0, y1=39, fillcolor="#ffe4e6", opacity=0.34, line_width=0)
+    fig.update_layout(title="기술 조건 충족도 히스토리", xaxis_title="날짜", yaxis_title="조건 충족도", yaxis_range=[0, 100], height=420)
     return apply_chart_theme(fig)
 
 
@@ -2720,9 +2873,14 @@ def render_metric_summary(latest, signal_result):
     ]
 
     card_html = "<div class='metric-grid'>"
-    for label, value, sub in cards:
+    for index, (label, value, sub) in enumerate(cards):
+        class_name = "metric-card"
+        if index == 0:
+            class_name += " metric-primary"
+        elif index == 1:
+            class_name += " metric-signal"
         card_html += (
-            "<div class='metric-card'>"
+            f"<div class='{class_name}'>"
             f"<div class='label'>{label}</div>"
             f"<div class='value'>{value}</div>"
             f"<div class='sub'>{sub}</div>"
@@ -2741,7 +2899,6 @@ def render_metric_summary(latest, signal_result):
         """,
         unsafe_allow_html=True,
     )
-
 
 def get_data_quality_status(df):
     if df is None or df.empty:
@@ -2859,7 +3016,7 @@ def render_global_disclaimer_banner():
             ">
                 <b>⚠️ 면책 안내</b><br>
                 이 앱은 기술적 분석 조건 충족 여부를 점수로 요약하는 개인용 판단 보조 도구입니다.<br>
-                표시되는 점수는 기술 조건 충족 개수의 합산이며, 수익 확률·매수·매도 추천이 아닙니다.<br>
+                표시되는 점수는 기술 조건 충족 개수의 합산이며, 수익 확률이나 거래 지시가 아닙니다.<br>
                 KIS 미지원 자산과 미국 주식은 yfinance 참고 데이터로 조회되며 실제 시세와 차이가 있을 수 있습니다.<br>
                 레버리지·인버스 ETF는 구조적 위험이 크므로 반드시 별도로 확인하세요.<br>
                 모든 투자 판단과 그에 따른 결과는 본인에게 있습니다.
@@ -2921,7 +3078,7 @@ def render_asset_profile(asset_meta):
             """
             <div class="basis-card">
                 이 자산은 레버리지 또는 인버스 성격의 ETF로 분류됩니다.
-                일반 주식보다 변동성과 구조적 위험이 클 수 있으므로 기술적 점수는 단기 흐름 참고용으로만 해석해야 합니다.
+                일반 주식보다 변동성과 구조적 위험이 클 수 있으므로 기술 조건 충족도는 단기 흐름 참고용으로만 해석해야 합니다.
             </div>
             """,
             unsafe_allow_html=True,
@@ -3980,11 +4137,11 @@ def render_indicator_guide():
     )
     st.warning(
         "레버리지/인버스 ETF는 일일 수익률을 추종하는 구조라 장기 누적 수익률이 기초지수와 다르게 움직일 수 있습니다. "
-        "기술적 점수는 상품 구조 위험을 대체하지 않습니다."
+        "기술 조건 충족도는 상품 구조 위험을 대체하지 않습니다."
     )
 
     st.subheader("기초 투자지표")
-    st.info("아래 기초 투자지표는 현재 앱의 기술적 점수에 직접 반영되지 않는 학습용 설명입니다.")
+    st.info("아래 기초 투자지표는 현재 앱의 기술 조건 충족도에 직접 반영되지 않는 학습용 설명입니다.")
     render_guide_table(
         [
             {
@@ -4073,7 +4230,7 @@ def render_usage_guide():
         - 데이터 기준 안내 박스에서 최근 거래일, 가격 기준, 데이터 품질 상태를 먼저 확인하세요.
         - 분봉 데이터는 실시간 시세가 아니며 지연되거나 일부 누락될 수 있습니다.
         - OpenDART 공시는 한국 주식 참고 정보이며, ETF와 미국 자산은 DART 대상이 아닐 수 있습니다.
-        - 공시와 뉴스는 기술적 점수에 직접 반영하지 않고 참고 정보로만 표시합니다.
+        - 공시와 뉴스는 기술 조건 충족도에 직접 반영하지 않고 참고 정보로만 표시합니다.
 
         최종 판단과 책임은 사용자에게 있습니다.
         """
@@ -4239,7 +4396,7 @@ def render_single_stock_analysis(
             st.caption("과거 조건 발생 사례는 과거 데이터 기반 참고이며 이후 성과를 의미하지 않습니다.")
 
     with external_tab:
-        st.write("공시와 뉴스는 기술적 점수에 직접 반영하지 않고 참고 정보로만 표시합니다.")
+        st.write("공시와 뉴스는 기술 조건 충족도에 직접 반영하지 않고 참고 정보로만 표시합니다.")
 
         if show_dart:
             stock_code = get_stock_code(normalized_ticker)
