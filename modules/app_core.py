@@ -3207,8 +3207,8 @@ def render_global_disclaimer_banner():
                 color: #374151;
             ">
                 <b>⚠️ 면책 안내</b><br>
-                이 앱은 기술적 분석 조건 충족 여부를 점수로 요약하는 개인용 판단 보조 도구입니다.<br>
-                표시되는 점수는 기술 조건 충족 개수의 합산이며, 수익 확률이나 거래 지시가 아닙니다.<br>
+                이 앱은 기술적 분석 조건 충족 여부를 조건 충족도로 요약하는 개인용 판단 보조 도구입니다.<br>
+                표시되는 조건 충족도는 기술 조건 충족 개수의 합산이며, 수익 확률이나 거래 지시가 아닙니다.<br>
                 KIS 미지원 자산과 미국 주식은 yfinance 참고 데이터로 조회되며 실제 시세와 차이가 있을 수 있습니다.<br>
                 레버리지·인버스 ETF는 구조적 위험이 크므로 반드시 별도로 확인하세요.<br>
                 모든 투자 판단과 그에 따른 결과는 본인에게 있습니다.
@@ -3333,10 +3333,10 @@ def build_technical_score_summary(score_details):
         }
 
     category_map = {
-        "추세 점수": ["이동평균 배열", "이동평균 교차", "ADX 추세 강도"],
-        "모멘텀 점수": ["RSI", "MACD", "볼린저 밴드"],
-        "거래량 점수": ["거래량"],
-        "변동성 안정성 점수": ["ATR 변동성"],
+        "추세 조건 충족도": ["이동평균 배열", "이동평균 교차", "ADX 추세 강도"],
+        "모멘텀 조건 충족도": ["RSI", "MACD", "볼린저 밴드"],
+        "거래량 조건 충족도": ["거래량"],
+        "변동성 안정성 조건 충족도": ["ATR 변동성"],
         "수급/OBV 참고": ["OBV"],
     }
     rows = []
@@ -3380,12 +3380,12 @@ def build_technical_score_summary(score_details):
 
 
 def render_technical_score_breakdown(signal_result):
-    st.subheader("기술 점수 근거 분해")
+    st.subheader("기술 조건 충족도 근거 분해")
     score_summary = build_technical_score_summary(signal_result.get("score_details", pd.DataFrame()))
     summary_df = score_summary["summary_df"]
 
     if summary_df.empty:
-        st.info("기술 점수 근거를 분해할 수 있는 데이터가 부족합니다.")
+        st.info("기술 조건 충족도 근거를 분해할 수 있는 데이터가 부족합니다.")
         return
 
     cards = [
@@ -3411,7 +3411,7 @@ def render_technical_score_breakdown(signal_result):
         <div class="basis-card">
             <b>과열/침체 참고:</b> {html.escape(score_summary['overheat_note'])}<br>
             <b>수급/OBV 참고:</b> {html.escape(score_summary['obv_note'])}<br>
-            기술 점수 근거 분해는 점수가 나온 배경을 설명하기 위한 판단 보조 정보입니다.
+            기술 조건 충족도 근거 분해는 조건 충족도가 나온 배경을 설명하기 위한 판단 보조 정보입니다.
         </div>
         """,
         unsafe_allow_html=True,
@@ -3607,7 +3607,7 @@ def render_swing_summary(df, result):
     )
     condition = result.get("condition", "관망/확인 구간")
     cards = [
-        ("1개월 스윙 조건 충족도", f"{result['swing_score']} / 100", "단기 스윙 점검 점수"),
+        ("1개월 스윙 조건 충족도", f"{result['swing_score']} / 100", "단기 스윙 점검"),
         (
             "스윙 참고 신호",
             f"<span class='signal-badge {badge_class}'>{result['swing_signal']}</span>",
@@ -3634,9 +3634,9 @@ def render_swing_summary(df, result):
 
     st.markdown(card_html, unsafe_allow_html=True)
 
-    notice = "1개월 스윙 조건 충족도는 단기 기술적 조건이 얼마나 충족되었는지를 나타내는 판단 보조 점수입니다."
+    notice = "1개월 스윙 조건 충족도는 단기 기술적 조건이 얼마나 충족되었는지를 나타내는 판단 보조 지표입니다."
     if result.get("asset_type") in ["인버스 ETF", "인버스 레버리지 ETF"]:
-        notice += " 인버스 상품의 점수는 해당 상품 가격 기준이며, 기초지수 방향성과 반대로 움직일 수 있습니다."
+        notice += " 인버스 상품의 조건 충족도는 해당 상품 가격 기준이며, 기초지수 방향성과 반대로 움직일 수 있습니다."
 
     st.markdown(
         f"""
@@ -3650,7 +3650,7 @@ def render_swing_summary(df, result):
     )
 
     if not result["score_details"].empty:
-        with st.expander("1개월 스윙 세부 점수 보기", expanded=False):
+        with st.expander("1개월 스윙 세부 조건 충족도 보기", expanded=False):
             st.dataframe(result["score_details"], use_container_width=True, hide_index=True)
 
 
@@ -3939,7 +3939,7 @@ def render_watchlist_scanner(dart_api_key, data_source_preference="auto"):
                 st.info(f"최대 {WATCHLIST_MAX_COUNT}개까지만 분석합니다. 초과 입력된 {overflow_count}개 종목은 이번 분석에서 제외했습니다.")
 
             def fetch_and_score_single(asset_ref):
-                """단일 자산 데이터 조회와 점수 계산을 수행하고, 예외는 실패 row로 변환합니다."""
+                """단일 자산 데이터 조회와 조건 충족도 계산을 수행하고, 예외는 실패 row로 변환합니다."""
                 try:
                     return analyze_watchlist_ticker(
                         asset_ref,
@@ -4041,7 +4041,7 @@ def render_watchlist_scanner(dart_api_key, data_source_preference="auto"):
             display_df[percent_column] = display_df[percent_column].apply(format_percent)
 
     st.dataframe(display_df[display_columns], use_container_width=True, hide_index=True)
-    st.caption("종합 점검 조건 충족도는 정렬용 참고 점수이며, 일봉 기술 조건 충족도와 당일 흐름 조건 충족도를 대체하지 않습니다.")
+    st.caption("종합 점검 조건 충족도는 정렬용 참고 지표이며, 일봉 기술 조건 충족도와 당일 흐름 조건 충족도를 대체하지 않습니다.")
 
 
 def render_guide_table(rows):
@@ -4051,7 +4051,7 @@ def render_guide_table(rows):
 def render_indicator_guide():
     st.subheader("지표 설명")
     st.info(
-        "이 탭은 앱의 점수와 차트를 처음 보는 사람도 흐름을 이해할 수 있도록 만든 학습용 설명입니다. "
+        "이 탭은 앱의 조건 충족도와 차트를 처음 보는 사람도 흐름을 이해할 수 있도록 만든 학습용 설명입니다. "
         "각 지표는 단독 판단보다 여러 조건을 함께 확인할 때 더 의미가 있습니다."
     )
 
@@ -4218,37 +4218,37 @@ def render_indicator_guide():
     )
     st.caption("기술적 지표는 가격과 거래량의 과거 흐름을 정리한 참고값이며, 하나의 지표만으로 판단하기 어렵습니다.")
 
-    st.subheader("점수 해석")
+    st.subheader("조건 충족도 해석")
     render_guide_table(
         [
             {
-                "점수 이름": "일봉 기술 조건 충족도",
+                "항목": "일봉 기술 조건 충족도",
                 "범위": "0~100점",
-                "의미": "이동평균, RSI, MACD, 거래량, 볼린저 밴드, ADX, ATR, OBV를 종합한 참고 점수입니다.",
+                "의미": "이동평균, RSI, MACD, 거래량, 볼린저 밴드, ADX, ATR, OBV를 종합한 참고 조건 충족도입니다.",
                 "높을 때 참고": "여러 기술 조건이 우호적으로 겹친 상태를 참고합니다.",
                 "낮을 때 참고": "기술 조건이 약하거나 리스크 조건이 많을 수 있습니다.",
-                "주의점": "공시와 뉴스는 점수에 직접 반영하지 않습니다.",
+                "주의점": "공시와 뉴스는 조건 충족도에 직접 반영하지 않습니다.",
             },
             {
-                "점수 이름": "1개월 스윙 조건 충족도",
+                "항목": "1개월 스윙 조건 충족도",
                 "범위": "0~100점",
                 "의미": "최근 약 20거래일 단기 흐름을 기준으로 조건 충족도를 표시합니다.",
                 "높을 때 참고": "단기 흐름이 우세한 조건을 많이 충족한 상태를 참고합니다.",
                 "낮을 때 참고": "단기 흐름이 약하거나 확인이 더 필요한 상태를 참고합니다.",
-                "주의점": "단기 점수라 시장 변동에 빠르게 바뀔 수 있습니다.",
+                "주의점": "단기 조건 충족도라 시장 변동에 빠르게 바뀔 수 있습니다.",
             },
             {
-                "점수 이름": "당일 흐름 조건 충족도",
+                "항목": "당일 흐름 조건 충족도",
                 "범위": "0~100점",
-                "의미": "분봉, VWAP, 당일 가격 위치, 거래량을 기준으로 오늘 흐름을 정리한 참고 점수입니다.",
+                "의미": "분봉, VWAP, 당일 가격 위치, 거래량을 기준으로 오늘 흐름을 정리한 참고 조건 충족도입니다.",
                 "높을 때 참고": "당일 가격과 거래량 흐름이 상대적으로 우세할 수 있습니다.",
                 "낮을 때 참고": "당일 흐름이 약하거나 평균 체결 흐름보다 아래일 수 있습니다.",
                 "주의점": "실시간 시세가 아닐 수 있어 장중 판단에는 별도 확인이 필요합니다.",
             },
             {
-                "점수 이름": "종합 점검 조건 충족도",
+                "항목": "종합 점검 조건 충족도",
                 "범위": "0~100점",
-                "의미": "관심자산 스캐너에서 여러 자산을 정렬하기 위한 참고 점수입니다.",
+                "의미": "관심자산 스캐너에서 여러 자산을 정렬하기 위한 참고 조건 충족도입니다.",
                 "높을 때 참고": "먼저 살펴볼 후보를 정리하는 데 사용합니다.",
                 "낮을 때 참고": "조건 충족이 적거나 리스크 참고 항목이 있을 수 있습니다.",
                 "주의점": "최종 판단을 대신하지 않습니다.",
@@ -4401,20 +4401,20 @@ def render_usage_guide():
         ### 앱 목적
         이 앱은 실제 투자 조언이 아니라 기술적 분석과 공개 정보를 한 화면에서 정리하는 개인용 판단 보조 도구입니다.
 
-        ### 점수 해석법
-        - 일봉 기술 조건 충족도는 이동평균, RSI, MACD, 거래량, 볼린저 밴드, ADX, ATR, OBV 조건을 종합한 참고 점수입니다.
-        - 일봉 점수 구간은 0-19점 강한 약세 주의, 20-39점 약세 주의, 40-60점 관망/확인 구간, 61-80점 상승 관심 조건, 81-100점 상승 관심 조건 강함으로 표시합니다.
-        - 1개월 스윙 조건 충족도는 최근 약 20거래일 흐름을 기준으로 단기 조건 충족도를 확인하는 판단 보조 점수입니다.
+        ### 조건 충족도 해석법
+        - 일봉 기술 조건 충족도는 이동평균, RSI, MACD, 거래량, 볼린저 밴드, ADX, ATR, OBV 조건을 종합한 참고 조건 충족도입니다.
+        - 일봉 조건 충족도 구간은 0-19점 강한 약세 주의, 20-39점 약세 주의, 40-60점 관망/확인 구간, 61-80점 상승 관심 조건, 81-100점 상승 관심 조건 강함으로 표시합니다.
+        - 1개월 스윙 조건 충족도는 최근 약 20거래일 흐름을 기준으로 단기 조건 충족도를 확인하는 판단 보조 지표입니다.
         - 당일 흐름 조건 충족도는 yfinance 분봉 데이터를 기준으로 당일 가격, VWAP, 분봉 이동평균, 거래량 흐름을 참고합니다.
-        - 점수가 높아도 이후 결과를 의미하지 않으며, 점수가 낮아도 단독 판단 근거로 사용하기 어렵습니다.
+        - 조건 충족 항목이 많아도 이후 결과를 의미하지 않으며, 조건 충족 항목이 적어도 단독 판단 근거로 사용하기 어렵습니다.
 
         ### 관심자산 스캐너
         관심자산 스캐너의 분석 후보는 먼저 점검할 대상을 정리하는 기능이며 매매 판단을 대신하지 않습니다.
-        종합 점검 조건 충족도는 화면 정렬용 참고 점수입니다.
+        종합 점검 조건 충족도는 화면 정렬용 참고 지표입니다.
 
         ### ETF/레버리지/인버스 ETF 주의사항
         레버리지와 인버스 ETF는 일반 주식보다 변동성과 구조적 위험이 클 수 있습니다.
-        인버스 상품의 점수는 해당 상품 가격 기준이며, 기초지수 방향성과 반대로 움직일 수 있습니다.
+        인버스 상품의 조건 충족도는 해당 상품 가격 기준이며, 기초지수 방향성과 반대로 움직일 수 있습니다.
 
         ### 데이터 한계
         - KIS API 키가 설정된 경우 국내 주식/ETF는 한국투자 KIS Open API를 우선 사용하고, 미지원 자산이나 조회 실패 시 yfinance 참고 데이터로 보완합니다.
@@ -4448,7 +4448,7 @@ def render_single_stock_analysis(
                 <p>
                     왼쪽 사이드바에서 자산명 또는 코드와 분석 기간을 선택한 뒤 <b>분석 시작</b>을 누르면
                     기술 조건 충족도, 1개월 스윙 점검, 보조 판단, 차트, 과거 조건 사례, 공시/뉴스 참고 정보를 확인할 수 있습니다.
-                    점수 해석은 0-19점 강한 약세 주의, 20-39점 약세 주의, 40-60점 관망/확인 구간,
+                    조건 충족도 해석은 0-19점 강한 약세 주의, 20-39점 약세 주의, 40-60점 관망/확인 구간,
                     61-80점 상승 관심 조건, 81-100점 상승 관심 조건 강함입니다.
                 </p>
             </div>
@@ -4509,7 +4509,7 @@ def render_single_stock_analysis(
     render_condition_checklist(signal_result)
     render_indicator_caution_notes()
 
-    with st.expander("평가 항목별 원점수 보기", expanded=False):
+    with st.expander("평가 항목별 조건 충족도 보기", expanded=False):
         st.dataframe(signal_result["score_details"], use_container_width=True)
 
     render_technical_score_breakdown(signal_result)
@@ -4574,14 +4574,18 @@ def render_single_stock_analysis(
         if not backtest_summary:
             st.info("과거 흐름 확인에 사용할 상승 관심 조건 발생 사례가 충분하지 않습니다.")
         else:
-            col1, col2, col3 = st.columns(3)
-            col1.metric("상승 관심 조건 발생 횟수", f"{backtest_summary['상승 관심 조건 발생 횟수']:,}")
-            col1.metric("5거래일 평균 수익률", format_percent(backtest_summary["5거래일 평균 수익률"]))
-            col2.metric("20거래일 평균 수익률", format_percent(backtest_summary["20거래일 평균 수익률"]))
-            col2.metric("5거래일 양수 비율", format_percent(backtest_summary["5거래일 양수 비율"]))
-            col3.metric("20거래일 양수 비율", format_percent(backtest_summary["20거래일 양수 비율"]))
-            col3.metric("평균 최대 하락률", format_percent(backtest_summary["평균 최대 하락률"]))
-            st.dataframe(backtest_df.tail(50).sort_values("조건 발생 날짜", ascending=False), use_container_width=True)
+            st.warning(
+                "⚠️ 과거 조건 발생 사례는 특정 기술 조건이 충족된 시점의 목록입니다. "
+                "이후 가격 흐름과 인과관계가 없으며, 수익·손실 예측이 아닙니다. "
+                "아래 표는 날짜·보조 판단·기준 종가만 표시합니다."
+            )
+            backtest_display_columns = ["조건 발생 날짜", "조건", "기준 종가"]
+            st.dataframe(
+                backtest_df[backtest_display_columns]
+                .tail(50)
+                .sort_values("조건 발생 날짜", ascending=False),
+                use_container_width=True,
+            )
             st.caption("과거 조건 발생 사례는 과거 데이터 기반 참고이며 이후 성과를 의미하지 않습니다.")
 
     with external_tab:
