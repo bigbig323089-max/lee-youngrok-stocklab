@@ -503,6 +503,15 @@ def load_custom_css():
                 font-size: 0.91rem;
             }
 
+            .stPlotlyChart {
+                overflow-x: hidden;
+                max-width: 100%;
+            }
+
+            .stPlotlyChart .js-plotly-plot {
+                max-width: 100%;
+            }
+
             .empty-guide {
                 background: #ffffff;
                 border: 1px solid var(--line);
@@ -2026,6 +2035,43 @@ def format_percent(value):
         return "-"
 
 
+def get_chart_config():
+    return {
+        "scrollZoom": True,
+        "displayModeBar": True,
+        "displaylogo": False,
+        "responsive": True,
+        "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
+        "toImageButtonOptions": {
+            "format": "png",
+            "filename": "youngrok_stocklab_chart",
+            "scale": 2,
+        },
+    }
+
+
+def create_empty_chart(title, message="차트를 표시할 데이터가 부족합니다."):
+    fig = go.Figure()
+    fig.update_layout(
+        title=title,
+        xaxis_title="날짜",
+        yaxis_title="값",
+        height=420,
+        annotations=[
+            dict(
+                text=message,
+                x=0.5,
+                y=0.5,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                font=dict(size=14, color="#64748b"),
+            )
+        ],
+    )
+    return apply_interactive_chart_layout(fig, title=title, height=420)
+
+
 def apply_chart_theme(fig):
     fig.update_layout(
         template="plotly_white",
@@ -2045,6 +2091,58 @@ def apply_chart_theme(fig):
     fig.update_xaxes(showgrid=True, gridcolor="#eef2f7", zeroline=False)
     fig.update_yaxes(showgrid=True, gridcolor="#eef2f7", zeroline=False)
     return fig
+
+
+def apply_interactive_chart_layout(
+    fig,
+    title=None,
+    height=560,
+    x_tickformat="%Y-%m-%d",
+    show_rangeslider=False,
+    range_buttons=None,
+    dragmode="pan",
+):
+    if title:
+        fig.update_layout(title=title)
+
+    fig.update_layout(
+        height=height,
+        hovermode="x unified",
+        dragmode=dragmode,
+        autosize=True,
+        xaxis_rangeslider_visible=show_rangeslider,
+        modebar=dict(orientation="v"),
+    )
+    fig.update_xaxes(
+        type="date",
+        tickformat=x_tickformat,
+        showspikes=True,
+        spikesnap="cursor",
+        spikemode="across",
+        spikecolor="#64748b",
+        spikethickness=1,
+        rangeslider=dict(visible=show_rangeslider),
+        rangeselector=dict(buttons=range_buttons) if range_buttons else None,
+    )
+    fig.update_yaxes(
+        showspikes=True,
+        spikesnap="cursor",
+        spikemode="across",
+        spikecolor="#64748b",
+        spikethickness=1,
+    )
+    return apply_chart_theme(fig)
+
+
+def render_plotly_chart(fig, key=None, height=None):
+    if height is not None:
+        fig.update_layout(height=height)
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config=get_chart_config(),
+        key=key,
+    )
 
 
 def create_score_gauge(score):
@@ -2103,61 +2201,104 @@ def create_score_gauge(score):
     )
     return fig
 
-def create_price_chart(df, signal_history=None):
+def create_price_chart(df, signal_history=None, chart_mode="기본 보기", show_rangeslider=False):
+    required = ["Open", "High", "Low", "Close"]
+    if df is None or df.empty or any(column not in df.columns for column in required):
+        return create_empty_chart("주가 캔들봉 차트")
+
+    chart_df = df.dropna(subset=required).copy()
+    if chart_df.empty:
+        return create_empty_chart("주가 캔들봉 차트")
+
     fig = go.Figure()
+    hover_text = [
+        (
+            f"날짜: {pd.Timestamp(index).strftime('%Y-%m-%d')}<br>"
+            f"시가: {row['Open']:,.2f}<br>"
+            f"고가: {row['High']:,.2f}<br>"
+            f"저가: {row['Low']:,.2f}<br>"
+            f"종가: {row['Close']:,.2f}"
+        )
+        for index, row in chart_df.iterrows()
+    ]
 
     fig.add_trace(
         go.Candlestick(
-            x=df.index,
-            open=df["Open"],
-            high=df["High"],
-            low=df["Low"],
-            close=df["Close"],
+            x=chart_df.index,
+            open=chart_df["Open"],
+            high=chart_df["High"],
+            low=chart_df["Low"],
+            close=chart_df["Close"],
             name="일봉",
-            increasing_line_color="#ef4444",
-            decreasing_line_color="#2563eb",
+            increasing_line_color="#2563eb",
+            increasing_fillcolor="rgba(37, 99, 235, 0.18)",
+            decreasing_line_color="#e11d48",
+            decreasing_fillcolor="rgba(225, 29, 72, 0.18)",
+            hovertext=hover_text,
+            hoverinfo="text",
         )
     )
 
-    line_traces = [
-        ("MA5", "MA5", "#f59e0b"),
-        ("MA20", "MA20", "#10b981"),
-        ("MA60", "MA60", "#6366f1"),
-        ("Bollinger_Upper", "볼린저 상단선", "#94a3b8"),
-        ("Bollinger_Lower", "볼린저 하단선", "#94a3b8"),
-    ]
+    mode_map = {
+        "기본 보기": [("MA20", "MA20", "#10b981"), ("MA60", "MA60", "#6366f1")],
+        "이동평균 중심": [
+            ("MA5", "MA5", "#f59e0b"),
+            ("MA10", "MA10", "#8b5cf6"),
+            ("MA20", "MA20", "#10b981"),
+            ("MA60", "MA60", "#6366f1"),
+        ],
+        "볼린저 밴드 중심": [
+            ("Bollinger_Upper", "볼린저 상단선", "#94a3b8"),
+            ("Bollinger_Middle", "볼린저 중심선", "#64748b"),
+            ("Bollinger_Lower", "볼린저 하단선", "#94a3b8"),
+        ],
+        "신호 마커 포함": [("MA20", "MA20", "#10b981"), ("MA60", "MA60", "#6366f1")],
+        "전체 보기": [
+            ("MA5", "MA5", "#f59e0b"),
+            ("MA10", "MA10", "#8b5cf6"),
+            ("MA20", "MA20", "#10b981"),
+            ("MA60", "MA60", "#6366f1"),
+            ("Bollinger_Upper", "볼린저 상단선", "#94a3b8"),
+            ("Bollinger_Middle", "볼린저 중심선", "#64748b"),
+            ("Bollinger_Lower", "볼린저 하단선", "#94a3b8"),
+        ],
+    }
 
-    for column, name, color in line_traces:
-        fig.add_trace(
-            go.Scatter(
-                x=df.index,
-                y=df[column],
-                mode="lines",
-                name=name,
-                line=dict(width=1.1, color=color),
+    for column, name, color in mode_map.get(chart_mode, mode_map["기본 보기"]):
+        if column in chart_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=chart_df.index,
+                    y=chart_df[column],
+                    mode="lines",
+                    name=name,
+                    line=dict(width=1.15, color=color),
+                    hovertemplate=f"{name}<br>날짜: %{{x|%Y-%m-%d}}<br>값: %{{y:,.2f}}<extra></extra>",
+                )
             )
-        )
 
     reference_lines = [
-        ("20일 고점", df["High"].tail(20).max(), "#dc2626", "dot"),
-        ("20일 저점", df["Low"].tail(20).min(), "#2563eb", "dot"),
-        ("60일 고점", df["High"].tail(60).max(), "#991b1b", "dash"),
-        ("60일 저점", df["Low"].tail(60).min(), "#1d4ed8", "dash"),
+        ("20일 고점", chart_df["High"].tail(20).max(), "#e11d48", "dot"),
+        ("20일 저점", chart_df["Low"].tail(20).min(), "#2563eb", "dot"),
+        ("60일 고점", chart_df["High"].tail(60).max(), "#be123c", "dash"),
+        ("60일 저점", chart_df["Low"].tail(60).min(), "#1d4ed8", "dash"),
     ]
 
     for name, value, color, dash in reference_lines:
-        fig.add_trace(
-            go.Scatter(
-                x=[df.index.min(), df.index.max()],
-                y=[value, value],
-                mode="lines",
-                name=name,
-                line=dict(width=0.9, color=color, dash=dash),
-                hovertemplate=f"{name}: {value:,.2f}<extra></extra>",
+        if pd.notna(value):
+            fig.add_trace(
+                go.Scatter(
+                    x=[chart_df.index.min(), chart_df.index.max()],
+                    y=[value, value],
+                    mode="lines",
+                    name=name,
+                    line=dict(width=0.9, color=color, dash=dash),
+                    hovertemplate=f"{name}<br>값: {value:,.2f}<extra></extra>",
+                )
             )
-        )
 
-    if signal_history is not None and not signal_history.empty:
+    show_markers = chart_mode in ["신호 마커 포함", "전체 보기"]
+    if show_markers and signal_history is not None and not signal_history.empty:
         history = signal_history.copy()
         attention_signals = history[history["기술 조건 충족도"].apply(is_positive_attention_condition)]
         caution_signals = history[history["기술 조건 충족도"].apply(is_negative_caution_condition)]
@@ -2169,8 +2310,8 @@ def create_price_chart(df, signal_history=None):
                     y=attention_signals["Close"],
                     mode="markers",
                     name="상승 관심 조건",
-                    marker=dict(symbol="triangle-up", size=10, color="#2563eb", line=dict(width=1, color="#ffffff")),
-                    hovertemplate="상승 관심 조건<br>%{x}<br>종가 %{y:,.2f}<extra></extra>",
+                    marker=dict(symbol="triangle-up", size=8, color="#2563eb", line=dict(width=1, color="#ffffff")),
+                    hovertemplate="상승 관심 조건<br>날짜: %{x|%Y-%m-%d}<br>종가: %{y:,.2f}<extra></extra>",
                 )
             )
 
@@ -2181,88 +2322,153 @@ def create_price_chart(df, signal_history=None):
                     y=caution_signals["Close"],
                     mode="markers",
                     name="약세 주의 조건",
-                    marker=dict(symbol="triangle-down", size=10, color="#e11d48", line=dict(width=1, color="#ffffff")),
-                    hovertemplate="약세 주의 조건<br>%{x}<br>종가 %{y:,.2f}<extra></extra>",
+                    marker=dict(symbol="triangle-down", size=8, color="#e11d48", line=dict(width=1, color="#ffffff")),
+                    hovertemplate="약세 주의 조건<br>날짜: %{x|%Y-%m-%d}<br>종가: %{y:,.2f}<extra></extra>",
                 )
             )
 
-    fig.update_layout(
+    fig.update_layout(xaxis_title="날짜", yaxis_title="가격")
+    return apply_interactive_chart_layout(
+        fig,
         title="주가 캔들봉 차트",
-        xaxis_title="날짜",
-        yaxis_title="가격",
-        hovermode="x unified",
-        height=540,
-        xaxis_rangeslider_visible=False,
-        xaxis=dict(
-            rangeselector=dict(
-                buttons=[
-                    dict(count=1, label="1개월", step="month", stepmode="backward"),
-                    dict(count=3, label="3개월", step="month", stepmode="backward"),
-                    dict(count=6, label="6개월", step="month", stepmode="backward"),
-                    dict(step="all", label="전체"),
-                ]
-            ),
-            rangeslider=dict(visible=False),
-            type="date",
-        ),
+        height=620,
+        x_tickformat="%Y-%m-%d",
+        show_rangeslider=show_rangeslider,
+        range_buttons=[
+            dict(count=1, label="1개월", step="month", stepmode="backward"),
+            dict(count=3, label="3개월", step="month", stepmode="backward"),
+            dict(count=6, label="6개월", step="month", stepmode="backward"),
+            dict(count=1, label="1년", step="year", stepmode="backward"),
+            dict(step="all", label="전체"),
+        ],
     )
-
-    return apply_chart_theme(fig)
 
 
 def create_volume_chart(df):
+    if df is None or df.empty or "Volume" not in df.columns:
+        return create_empty_chart("거래량 차트")
+
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="거래량"))
-    fig.add_trace(go.Scatter(x=df.index, y=df["Volume_MA20"], mode="lines", name="거래량 20일 평균"))
-    fig.update_layout(title="거래량 차트", xaxis_title="날짜", yaxis_title="거래량", hovermode="x unified", height=420)
-    return apply_chart_theme(fig)
+    fig.add_trace(
+        go.Bar(
+            x=df.index,
+            y=df["Volume"],
+            name="거래량",
+            marker_color="rgba(37, 99, 235, 0.45)",
+            hovertemplate="날짜: %{x|%Y-%m-%d}<br>거래량: %{y:,.0f}<extra></extra>",
+        )
+    )
+    if "Volume_MA20" in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df.index,
+                y=df["Volume_MA20"],
+                mode="lines",
+                name="거래량 20일 평균",
+                line=dict(color="#f59e0b", width=1.4),
+                hovertemplate="날짜: %{x|%Y-%m-%d}<br>20일 평균: %{y:,.0f}<extra></extra>",
+            )
+        )
+    fig.update_layout(xaxis_title="날짜", yaxis_title="거래량")
+    return apply_interactive_chart_layout(fig, title="거래량 차트", height=440)
 
 
 def create_rsi_chart(df):
+    if df is None or df.empty or "RSI" not in df.columns:
+        return create_empty_chart("RSI 차트")
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df["RSI"], mode="lines", name="RSI"))
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["RSI"],
+            mode="lines",
+            name="RSI",
+            line=dict(color="#2563eb", width=1.6),
+            hovertemplate="날짜: %{x|%Y-%m-%d}<br>RSI: %{y:.2f}<extra></extra>",
+        )
+    )
     fig.add_hline(y=70, line_dash="dash", annotation_text="RSI 기준선 70")
     fig.add_hline(y=30, line_dash="dash", annotation_text="RSI 기준선 30")
-    fig.update_layout(title="RSI 차트", xaxis_title="날짜", yaxis_title="RSI", hovermode="x unified", height=420)
-    return apply_chart_theme(fig)
+    fig.update_layout(xaxis_title="날짜", yaxis_title="RSI", yaxis_range=[0, 100])
+    return apply_interactive_chart_layout(fig, title="RSI 차트", height=440)
 
 
 def create_macd_chart(df):
+    required = ["MACD", "MACD_Signal", "MACD_Histogram"]
+    if df is None or df.empty or any(column not in df.columns for column in required):
+        return create_empty_chart("MACD 차트")
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df["MACD"], mode="lines", name="MACD"))
-    fig.add_trace(go.Scatter(x=df.index, y=df["MACD_Signal"], mode="lines", name="MACD Signal"))
-    fig.add_trace(go.Bar(x=df.index, y=df["MACD_Histogram"], name="MACD Histogram"))
-    fig.update_layout(title="MACD 차트", xaxis_title="날짜", yaxis_title="MACD", hovermode="x unified", height=420)
-    return apply_chart_theme(fig)
+    hist_colors = np.where(df["MACD_Histogram"] >= 0, "rgba(37, 99, 235, 0.42)", "rgba(225, 29, 72, 0.38)")
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["MACD"],
+            mode="lines",
+            name="MACD",
+            line=dict(color="#2563eb", width=1.5),
+            hovertemplate="날짜: %{x|%Y-%m-%d}<br>MACD: %{y:,.4f}<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["MACD_Signal"],
+            mode="lines",
+            name="MACD Signal",
+            line=dict(color="#f59e0b", width=1.4),
+            hovertemplate="날짜: %{x|%Y-%m-%d}<br>Signal: %{y:,.4f}<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=df.index,
+            y=df["MACD_Histogram"],
+            name="MACD Histogram",
+            marker_color=hist_colors,
+            hovertemplate="날짜: %{x|%Y-%m-%d}<br>Histogram: %{y:,.4f}<extra></extra>",
+        )
+    )
+    fig.update_layout(xaxis_title="날짜", yaxis_title="MACD")
+    return apply_interactive_chart_layout(fig, title="MACD 차트", height=440)
 
 
 def create_trend_risk_chart(df):
+    required = ["ADX", "Plus_DI", "Minus_DI", "ATR_Ratio"]
+    if df is None or df.empty or any(column not in df.columns for column in required):
+        return create_empty_chart("ADX / +DI / -DI / ATR 차트")
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df["ADX"], mode="lines", name="ADX"))
-    fig.add_trace(go.Scatter(x=df.index, y=df["Plus_DI"], mode="lines", name="+DI", line=dict(color="#16a34a", width=1.2)))
-    fig.add_trace(go.Scatter(x=df.index, y=df["Minus_DI"], mode="lines", name="-DI", line=dict(color="#dc2626", width=1.2)))
-    fig.add_trace(go.Scatter(x=df.index, y=df["ATR_Ratio"] * 100, mode="lines", name="ATR 비율(%)", yaxis="y2"))
+    fig.add_trace(go.Scatter(x=df.index, y=df["ADX"], mode="lines", name="ADX", line=dict(color="#2563eb", width=1.5), hovertemplate="날짜: %{x|%Y-%m-%d}<br>ADX: %{y:.2f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=df.index, y=df["Plus_DI"], mode="lines", name="+DI", line=dict(color="#16a34a", width=1.2), hovertemplate="날짜: %{x|%Y-%m-%d}<br>+DI: %{y:.2f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=df.index, y=df["Minus_DI"], mode="lines", name="-DI", line=dict(color="#e11d48", width=1.2), hovertemplate="날짜: %{x|%Y-%m-%d}<br>-DI: %{y:.2f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=df.index, y=df["ATR_Ratio"] * 100, mode="lines", name="ATR 비율(%)", yaxis="y2", line=dict(color="#8b5cf6", width=1.2), hovertemplate="날짜: %{x|%Y-%m-%d}<br>ATR 비율: %{y:.2f}%<extra></extra>"))
     fig.add_hline(y=25, line_dash="dash", annotation_text="ADX 기준선 25")
     fig.update_layout(
-        title="ADX / +DI / -DI / ATR 차트",
         xaxis_title="날짜",
         yaxis=dict(title="ADX / DI"),
         yaxis2=dict(title="ATR 비율(%)", overlaying="y", side="right"),
-        hovermode="x unified",
-        height=420,
     )
-    return apply_chart_theme(fig)
+    return apply_interactive_chart_layout(fig, title="ADX / +DI / -DI / ATR 차트", height=440)
 
 
 def create_obv_chart(df):
+    if df is None or df.empty or "OBV" not in df.columns:
+        return create_empty_chart("OBV 차트")
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df["OBV"], mode="lines", name="OBV"))
-    fig.add_trace(go.Scatter(x=df.index, y=df["OBV_MA20"], mode="lines", name="OBV 20일 평균"))
-    fig.update_layout(title="OBV 차트", xaxis_title="날짜", yaxis_title="OBV", hovermode="x unified", height=420)
-    return apply_chart_theme(fig)
+    fig.add_trace(go.Scatter(x=df.index, y=df["OBV"], mode="lines", name="OBV", line=dict(color="#2563eb", width=1.4), hovertemplate="날짜: %{x|%Y-%m-%d}<br>OBV: %{y:,.0f}<extra></extra>"))
+    if "OBV_MA20" in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df["OBV_MA20"], mode="lines", name="OBV 20일 평균", line=dict(color="#f59e0b", width=1.3), hovertemplate="날짜: %{x|%Y-%m-%d}<br>OBV 20일 평균: %{y:,.0f}<extra></extra>"))
+    fig.update_layout(xaxis_title="날짜", yaxis_title="OBV")
+    return apply_interactive_chart_layout(fig, title="OBV 차트", height=440)
 
 
 def create_signal_history_chart(signal_history):
+    if signal_history is None or signal_history.empty:
+        return create_empty_chart("기술 조건 충족도 히스토리")
+
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -2270,31 +2476,37 @@ def create_signal_history_chart(signal_history):
             y=signal_history["기술 조건 충족도"],
             mode="lines+markers",
             name="기술 조건 충족도",
+            line=dict(color="#2563eb", width=1.5),
+            marker=dict(size=6, color="#2563eb"),
+            hovertemplate="날짜: %{x|%Y-%m-%d}<br>조건 충족도: %{y:.0f}/100<extra></extra>",
         )
     )
     fig.add_hrect(y0=61, y1=100, fillcolor="#dbeafe", opacity=0.38, line_width=0)
     fig.add_hrect(y0=40, y1=60, fillcolor="#fef3c7", opacity=0.38, line_width=0)
     fig.add_hrect(y0=0, y1=39, fillcolor="#ffe4e6", opacity=0.34, line_width=0)
-    fig.update_layout(title="기술 조건 충족도 히스토리", xaxis_title="날짜", yaxis_title="조건 충족도", yaxis_range=[0, 100], height=420)
-    return apply_chart_theme(fig)
+    fig.update_layout(xaxis_title="날짜", yaxis_title="조건 충족도", yaxis_range=[0, 100])
+    return apply_interactive_chart_layout(fig, title="기술 조건 충족도 히스토리", height=440)
 
 
-def create_intraday_chart(df):
+def create_intraday_chart(df, show_rangeslider=False):
     analyzed = calculate_intraday_indicators(df)
     session_df = get_latest_intraday_session(analyzed)
+    required = ["Open", "High", "Low", "Close"]
+
+    if session_df.empty or any(column not in session_df.columns for column in required):
+        return create_empty_chart("분봉 캔들 참고 차트", "분봉 차트를 표시할 데이터가 부족합니다.")
 
     fig = go.Figure()
-
-    if session_df.empty:
-        fig.update_layout(
-            title="분봉 캔들 참고 차트",
-            xaxis_title="시간",
-            yaxis_title="가격",
-            hovermode="x unified",
-            height=460,
-            xaxis_rangeslider_visible=False,
+    hover_text = [
+        (
+            f"시간: {pd.Timestamp(index).strftime('%m-%d %H:%M')}<br>"
+            f"시가: {row['Open']:,.2f}<br>"
+            f"고가: {row['High']:,.2f}<br>"
+            f"저가: {row['Low']:,.2f}<br>"
+            f"종가: {row['Close']:,.2f}"
         )
-        return apply_chart_theme(fig)
+        for index, row in session_df.iterrows()
+    ]
 
     fig.add_trace(
         go.Candlestick(
@@ -2304,8 +2516,12 @@ def create_intraday_chart(df):
             low=session_df["Low"],
             close=session_df["Close"],
             name="분봉 캔들",
-            increasing_line_color="#ef4444",
-            decreasing_line_color="#2563eb",
+            increasing_line_color="#2563eb",
+            increasing_fillcolor="rgba(37, 99, 235, 0.18)",
+            decreasing_line_color="#e11d48",
+            decreasing_fillcolor="rgba(225, 29, 72, 0.18)",
+            hovertext=hover_text,
+            hoverinfo="text",
         )
     )
 
@@ -2324,6 +2540,7 @@ def create_intraday_chart(df):
                     mode="lines",
                     name=name,
                     line=dict(color=color, width=width),
+                    hovertemplate=f"{name}<br>시간: %{{x|%m-%d %H:%M}}<br>값: %{{y:,.2f}}<extra></extra>",
                 )
             )
 
@@ -2354,31 +2571,43 @@ def create_intraday_chart(df):
     )
 
     fig.update_layout(
-        title="분봉 캔들 참고 차트",
         xaxis_title="시간",
         yaxis_title="가격",
-        hovermode="x unified",
-        height=480,
-        xaxis_rangeslider_visible=False,
     )
-    return apply_chart_theme(fig)
+    return apply_interactive_chart_layout(
+        fig,
+        title="분봉 캔들 참고 차트",
+        height=520,
+        x_tickformat="%m-%d %H:%M",
+        show_rangeslider=show_rangeslider,
+        range_buttons=[
+            dict(count=30, label="30분", step="minute", stepmode="backward"),
+            dict(count=1, label="1시간", step="hour", stepmode="backward"),
+            dict(count=2, label="2시간", step="hour", stepmode="backward"),
+            dict(step="all", label="전체"),
+        ],
+    )
 
 
-def create_swing_chart(df):
+def create_swing_chart(df, show_rangeslider=False):
     analyzed = calculate_swing_indicators(df)
     chart_df = analyzed.tail(45).copy()
-    fig = go.Figure()
+    required = ["Open", "High", "Low", "Close"]
 
-    if chart_df.empty:
-        fig.update_layout(
-            title="1개월 스윙 점검 차트",
-            xaxis_title="날짜",
-            yaxis_title="가격",
-            hovermode="x unified",
-            height=480,
-            xaxis_rangeslider_visible=False,
+    if chart_df.empty or any(column not in chart_df.columns for column in required):
+        return create_empty_chart("1개월 스윙 점검 차트", "스윙 차트를 표시할 데이터가 부족합니다.")
+
+    fig = go.Figure()
+    hover_text = [
+        (
+            f"날짜: {pd.Timestamp(index).strftime('%Y-%m-%d')}<br>"
+            f"시가: {row['Open']:,.2f}<br>"
+            f"고가: {row['High']:,.2f}<br>"
+            f"저가: {row['Low']:,.2f}<br>"
+            f"종가: {row['Close']:,.2f}"
         )
-        return apply_chart_theme(fig)
+        for index, row in chart_df.iterrows()
+    ]
 
     fig.add_trace(
         go.Candlestick(
@@ -2388,8 +2617,12 @@ def create_swing_chart(df):
             low=chart_df["Low"],
             close=chart_df["Close"],
             name="일봉 캔들",
-            increasing_line_color="#ef4444",
-            decreasing_line_color="#2563eb",
+            increasing_line_color="#2563eb",
+            increasing_fillcolor="rgba(37, 99, 235, 0.18)",
+            decreasing_line_color="#e11d48",
+            decreasing_fillcolor="rgba(225, 29, 72, 0.18)",
+            hovertext=hover_text,
+            hoverinfo="text",
         )
     )
 
@@ -2408,6 +2641,7 @@ def create_swing_chart(df):
                     mode="lines",
                     name=name,
                     line=dict(width=1.3, color=color),
+                    hovertemplate=f"{name}<br>날짜: %{{x|%Y-%m-%d}}<br>값: %{{y:,.2f}}<extra></extra>",
                 )
             )
 
@@ -2438,14 +2672,22 @@ def create_swing_chart(df):
         )
 
     fig.update_layout(
-        title="1개월 스윙 점검 차트",
         xaxis_title="날짜",
         yaxis_title="가격",
-        hovermode="x unified",
-        height=500,
-        xaxis_rangeslider_visible=False,
     )
-    return apply_chart_theme(fig)
+    return apply_interactive_chart_layout(
+        fig,
+        title="1개월 스윙 점검 차트",
+        height=540,
+        x_tickformat="%Y-%m-%d",
+        show_rangeslider=show_rangeslider,
+        range_buttons=[
+            dict(count=5, label="5일", step="day", stepmode="backward"),
+            dict(count=10, label="10일", step="day", stepmode="backward"),
+            dict(count=1, label="1개월", step="month", stepmode="backward"),
+            dict(step="all", label="전체"),
+        ],
+    )
 
 
 def get_dart_api_key():
@@ -3664,16 +3906,14 @@ def build_market_flow_summary(market_df):
 
 
 def create_market_flow_chart(df, title):
-    fig = go.Figure()
     if df is None or df.empty or "Close" not in df.columns:
-        fig.update_layout(title=title)
-        return apply_chart_theme(fig)
+        return create_empty_chart(title)
 
     valid = df.dropna(subset=["Close"]).copy()
     if valid.empty:
-        fig.update_layout(title=title)
-        return apply_chart_theme(fig)
+        return create_empty_chart(title)
 
+    fig = go.Figure()
     normalized_close = valid["Close"] / valid["Close"].iloc[0] * 100
     fig.add_trace(
         go.Scatter(
@@ -3682,10 +3922,11 @@ def create_market_flow_chart(df, title):
             mode="lines",
             name="기준 100 상대 흐름",
             line=dict(color="#2563eb", width=2),
+            hovertemplate="날짜: %{x|%Y-%m-%d}<br>기준 100 흐름: %{y:.2f}<extra></extra>",
         )
     )
-    fig.update_layout(title=title, yaxis_title="기준 100", hovermode="x unified")
-    return apply_chart_theme(fig)
+    fig.update_layout(yaxis_title="기준 100")
+    return apply_interactive_chart_layout(fig, title=title, height=480)
 
 
 def render_market_flow_tab():
@@ -3736,7 +3977,8 @@ def render_market_flow_tab():
         selected_ticker = chart_options[selected_label]
         _, selected_df = chart_data[selected_ticker]
         render_data_source_badge(selected_df)
-        st.plotly_chart(create_market_flow_chart(selected_df, selected_label), use_container_width=True)
+        safe_ticker = selected_ticker.replace("^", "idx_").replace("=", "_").replace(".", "_")
+        render_plotly_chart(create_market_flow_chart(selected_df, selected_label), key=f"market_flow_chart_{safe_ticker}")
 
     st.caption("시장 흐름은 분석 배경을 정리하기 위한 참고 정보이며 특정 자산의 거래 지시가 아닙니다.")
 
@@ -3837,12 +4079,11 @@ def calculate_relative_strength(asset_df, benchmark_df, benchmark=None):
 
 
 def create_relative_strength_chart(result):
-    fig = go.Figure()
     rs_line = result.get("rs_line") if isinstance(result, dict) else None
     if rs_line is None or len(rs_line) == 0:
-        fig.update_layout(title="상대강도 RS 추이")
-        return apply_chart_theme(fig)
+        return create_empty_chart("상대강도 RS 추이")
 
+    fig = go.Figure()
     fig.add_trace(
         go.Scatter(
             x=rs_line.index,
@@ -3850,11 +4091,12 @@ def create_relative_strength_chart(result):
             mode="lines",
             name="RS 기준 100",
             line=dict(color="#2563eb", width=2),
+            hovertemplate="날짜: %{x|%Y-%m-%d}<br>RS 기준 100: %{y:.2f}<extra></extra>",
         )
     )
     fig.add_hline(y=100, line_dash="dot", line_color="#94a3b8", annotation_text="기준 100")
-    fig.update_layout(title="벤치마크 대비 상대강도 RS 추이", yaxis_title="상대강도", hovermode="x unified")
-    return apply_chart_theme(fig)
+    fig.update_layout(yaxis_title="상대강도")
+    return apply_interactive_chart_layout(fig, title="벤치마크 대비 상대강도 RS 추이", height=460)
 
 
 def render_relative_strength_panel(result):
@@ -3903,7 +4145,7 @@ def render_relative_strength_panel(result):
     )
 
     with st.expander("상대강도 차트 보기", expanded=False):
-        st.plotly_chart(create_relative_strength_chart(result), use_container_width=True)
+        render_plotly_chart(create_relative_strength_chart(result), key="relative_strength_chart")
 
 
 def parse_watchlist_input(text, max_count=WATCHLIST_MAX_COUNT):
@@ -4826,27 +5068,42 @@ def render_single_stock_analysis(
     )
 
     with chart_tab:
+        chart_control_col1, chart_control_col2 = st.columns([2, 1])
+        with chart_control_col1:
+            chart_mode = st.selectbox(
+                "차트 보기 모드",
+                ["기본 보기", "이동평균 중심", "볼린저 밴드 중심", "신호 마커 포함", "전체 보기"],
+                index=0,
+                help="주가 캔들 차트에 표시할 보조선을 선택합니다.",
+            )
+        with chart_control_col2:
+            show_chart_rangeslider = st.checkbox("차트 하단 범위 슬라이더 표시", value=False)
+        st.caption("모바일에서는 두 손가락으로 확대/축소하거나, 차트 우측 상단 도구를 사용하세요.")
+
         price_tab, swing_tab, volume_tab, rsi_tab, macd_tab, trend_tab, obv_tab, intraday_tab = st.tabs(
             ["주가", "1개월 스윙", "거래량", "RSI", "MACD", "ADX/ATR", "OBV", "분봉 참고"]
         )
 
         with price_tab:
             render_data_source_badge(analyzed_df)
-            st.plotly_chart(create_price_chart(analyzed_df, signal_history), use_container_width=True)
+            render_plotly_chart(
+                create_price_chart(analyzed_df, signal_history, chart_mode, show_chart_rangeslider),
+                key="price_chart",
+            )
         with swing_tab:
             render_data_source_badge(swing_analyzed_df)
-            st.plotly_chart(create_swing_chart(swing_analyzed_df), use_container_width=True)
+            render_plotly_chart(create_swing_chart(swing_analyzed_df, show_chart_rangeslider), key="swing_chart")
             st.caption("1개월 스윙 차트는 최근 약 20거래일 흐름을 중심으로 단기 추세, 고저점 위치, 이동평균 흐름을 참고합니다.")
         with volume_tab:
-            st.plotly_chart(create_volume_chart(analyzed_df), use_container_width=True)
+            render_plotly_chart(create_volume_chart(analyzed_df), key="volume_chart")
         with rsi_tab:
-            st.plotly_chart(create_rsi_chart(analyzed_df), use_container_width=True)
+            render_plotly_chart(create_rsi_chart(analyzed_df), key="rsi_chart")
         with macd_tab:
-            st.plotly_chart(create_macd_chart(analyzed_df), use_container_width=True)
+            render_plotly_chart(create_macd_chart(analyzed_df), key="macd_chart")
         with trend_tab:
-            st.plotly_chart(create_trend_risk_chart(analyzed_df), use_container_width=True)
+            render_plotly_chart(create_trend_risk_chart(analyzed_df), key="trend_risk_chart")
         with obv_tab:
-            st.plotly_chart(create_obv_chart(analyzed_df), use_container_width=True)
+            render_plotly_chart(create_obv_chart(analyzed_df), key="obv_chart")
         with intraday_tab:
             if show_intraday:
                 with st.spinner("분봉 데이터를 가져오는 중입니다..."):
@@ -4859,7 +5116,10 @@ def render_single_stock_analysis(
                     intraday_result = calculate_intraday_signal(intraday_analyzed_df, intraday_interval)
                     render_intraday_summary(intraday_analyzed_df, intraday_result)
                     render_data_source_badge(intraday_analyzed_df)
-                    st.plotly_chart(create_intraday_chart(intraday_analyzed_df), use_container_width=True)
+                    render_plotly_chart(
+                        create_intraday_chart(intraday_analyzed_df, show_chart_rangeslider),
+                        key="intraday_chart",
+                    )
                     st.caption("분봉 데이터는 실시간 시세가 아니며 지연되거나 일부 누락될 수 있습니다.")
             else:
                 st.info("사이드바에서 분봉 참고 차트 표시를 켜면 확인할 수 있습니다.")
@@ -4868,7 +5128,7 @@ def render_single_stock_analysis(
         if signal_history.empty:
             st.info("조건 히스토리를 계산할 수 없습니다.")
         else:
-            st.plotly_chart(create_signal_history_chart(signal_history), use_container_width=True)
+            render_plotly_chart(create_signal_history_chart(signal_history), key="signal_history_chart")
             st.dataframe(signal_history.tail(30).sort_values("Date", ascending=False), use_container_width=True)
 
     with backtest_tab:
