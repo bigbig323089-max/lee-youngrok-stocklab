@@ -472,6 +472,18 @@ def load_custom_css():
                 border-color: #fecdd3;
             }
 
+            .signal-caution {
+                background: #fff7ed;
+                color: #c2410c;
+                border-color: #fed7aa;
+            }
+
+            .signal-danger {
+                background: var(--rose-soft);
+                color: #be123c;
+                border-color: #fecdd3;
+            }
+
             .signal-muted {
                 background: #f1f5f9;
                 color: #475569;
@@ -3258,6 +3270,642 @@ def render_swing_summary(df, result):
             st.dataframe(result["score_details"], use_container_width=True, hide_index=True)
 
 
+def get_reliability_grade(score):
+    if score >= 85:
+        return "A", "높음", "가격 데이터가 비교적 안정적으로 정리되어 있습니다."
+    if score >= 70:
+        return "B", "양호", "대체로 사용할 수 있으나 일부 보완 확인이 필요합니다."
+    if score >= 50:
+        return "C", "주의", "데이터 출처, 기간, 누락 여부를 함께 확인해야 합니다."
+    return "D", "낮음", "해석 전 데이터 상태를 먼저 점검하는 편이 좋습니다."
+
+
+def calculate_period_return(df, days):
+    if df is None or df.empty or "Close" not in df.columns:
+        return np.nan
+
+    close = df["Close"].dropna()
+    if len(close) <= days:
+        return np.nan
+
+    base = close.iloc[-days - 1]
+    latest = close.iloc[-1]
+    if pd.isna(base) or base == 0 or pd.isna(latest):
+        return np.nan
+
+    return (latest / base) - 1
+
+
+def calculate_data_reliability(df, ticker=None, asset_meta=None):
+    reasons = []
+
+    if df is None or df.empty:
+        return {
+            "score": 0,
+            "grade": "D",
+            "label": "낮음",
+            "comment": "가격 데이터를 가져오지 못했습니다.",
+            "reasons": ["가격 데이터가 비어 있습니다."],
+            "source": "-",
+            "latest_date": "-",
+            "fallback": "",
+        }
+
+    data_source = str(df.attrs.get("data_source", "출처 불명"))
+    source_lower = data_source.lower()
+    fallback_reason = str(df.attrs.get("fallback_reason", "") or "")
+    requested_source = str(df.attrs.get("requested_source", "") or "")
+    score = 0
+
+    if data_source == "한국투자 KIS Open API":
+        score += 30
+        reasons.append("KIS 출처: 국내 지원 자산 기준으로 신뢰도 가점")
+    elif "yfinance" in source_lower:
+        score += 18
+        reasons.append("yfinance 출처: 참고 데이터로 분류")
+    else:
+        score += 8
+        reasons.append("출처 불명: 데이터 출처 확인 필요")
+
+    required = ["Open", "High", "Low", "Close", "Volume"]
+    missing_columns = [column for column in required if column not in df.columns]
+    if missing_columns:
+        score += 4
+        reasons.append("OHLCV 일부 컬럼 누락")
+        valid_df = pd.DataFrame()
+    else:
+        valid_df = df.dropna(subset=required).copy()
+        missing_ratio = 1 - (len(valid_df) / max(len(df), 1))
+        if missing_ratio <= 0.03:
+            score += 25
+            reasons.append("OHLCV 누락이 거의 없음")
+        elif missing_ratio <= 0.10:
+            score += 18
+            reasons.append("OHLCV 일부 누락")
+        else:
+            score += 8
+            reasons.append("OHLCV 누락 비율이 높음")
+
+    if not valid_df.empty:
+        if len(valid_df) >= 120:
+            score += 15
+            reasons.append("분석 기간이 충분함")
+        elif len(valid_df) >= 60:
+            score += 11
+            reasons.append("핵심 지표 계산에 필요한 최소 기간 확보")
+        elif len(valid_df) >= 30:
+            score += 6
+            reasons.append("단기 참고만 가능한 기간")
+        else:
+            score += 2
+            reasons.append("데이터 기간 부족")
+
+        try:
+            latest_date = pd.Timestamp(valid_df.index[-1]).date()
+            days_old = (date.today() - latest_date).days
+        except Exception:
+            latest_date = "-"
+            days_old = 999
+
+        if days_old <= 4:
+            score += 20
+            reasons.append("최근 거래일 데이터 확인")
+        elif days_old <= 7:
+            score += 14
+            reasons.append("최근 데이터가 다소 지연됨")
+        elif days_old <= 14:
+            score += 8
+            reasons.append("최근 데이터 지연 주의")
+        else:
+            score += 3
+            reasons.append("데이터 기준일이 오래됨")
+
+        invalid_price_ratio = (
+            (valid_df["Open"] <= 0)
+            | (valid_df["High"] <= 0)
+            | (valid_df["Low"] <= 0)
+            | (valid_df["Close"] <= 0)
+            | (valid_df["High"] < valid_df["Low"])
+            | (valid_df["Close"] > valid_df["High"] * 1.02)
+            | (valid_df["Close"] < valid_df["Low"] * 0.98)
+        ).mean()
+        if invalid_price_ratio == 0:
+            score += 10
+            reasons.append("가격 범위 일관성 양호")
+        elif invalid_price_ratio <= 0.03:
+            score += 5
+            reasons.append("일부 가격 범위 확인 필요")
+        else:
+            reasons.append("가격 범위 이상값 비율 높음")
+    else:
+        latest_date = "-"
+
+    if fallback_reason:
+        score -= 6
+        reasons.append("보완 조회 발생")
+    if requested_source in ["auto", "kis"] and "yfinance" in source_lower:
+        score -= 4
+        reasons.append("KIS 우선 설정에서 yfinance로 보완됨")
+
+    risk_badges = asset_meta.get("risk_badges", []) if isinstance(asset_meta, dict) else []
+    if risk_badges:
+        score -= 2
+        reasons.append("레버리지/인버스 등 구조적 위험 배지 존재")
+
+    score = int(max(0, min(100, round(score))))
+    grade, label, comment = get_reliability_grade(score)
+
+    return {
+        "score": score,
+        "grade": grade,
+        "label": label,
+        "comment": comment,
+        "reasons": reasons,
+        "source": data_source,
+        "latest_date": latest_date,
+        "fallback": fallback_reason,
+    }
+
+
+def render_data_reliability_panel(df, reliability_result):
+    grade = reliability_result.get("grade", "D")
+    score = reliability_result.get("score", 0)
+    label = reliability_result.get("label", "낮음")
+    comment = reliability_result.get("comment", "데이터 상태를 확인하세요.")
+    source = reliability_result.get("source", "-")
+    latest_date = reliability_result.get("latest_date", "-")
+
+    if grade == "A":
+        badge_class = "signal-good"
+    elif grade == "B":
+        badge_class = "signal-neutral"
+    elif grade == "C":
+        badge_class = "signal-caution"
+    else:
+        badge_class = "signal-danger"
+
+    st.markdown(
+        f"""
+        <div class="basis-card">
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
+                <b>데이터 신뢰도</b>
+                <span class="signal-badge {badge_class}">{html.escape(grade)}등급 · {score}/100</span>
+                <span class="sub">{html.escape(label)}</span>
+            </div>
+            <b>출처:</b> {html.escape(str(source))} · <b>기준일:</b> {html.escape(str(latest_date))}<br>
+            <span class="sub">{html.escape(str(comment))} 이 등급은 수익 가능성이 아니라 데이터 해석 전 확인할 품질 참고값입니다.</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("데이터 신뢰도 산정 근거", expanded=False):
+        for reason in reliability_result.get("reasons", []):
+            st.write(f"- {reason}")
+        fallback = reliability_result.get("fallback", "")
+        if fallback:
+            st.caption(f"보완 조회 사유: {fallback}")
+
+
+def get_market_watchlist():
+    return [
+        {"ticker": "^KS11", "name": "KOSPI", "group": "국내 시장", "role": "risk"},
+        {"ticker": "^KQ11", "name": "KOSDAQ", "group": "국내 시장", "role": "risk"},
+        {"ticker": "^GSPC", "name": "S&P 500", "group": "미국 시장", "role": "risk"},
+        {"ticker": "^IXIC", "name": "NASDAQ", "group": "미국 시장", "role": "risk"},
+        {"ticker": "QQQ", "name": "NASDAQ100 ETF", "group": "미국 성장주", "role": "risk"},
+        {"ticker": "SMH", "name": "반도체 ETF", "group": "섹터", "role": "sector"},
+        {"ticker": "XLK", "name": "미국 기술주 ETF", "group": "섹터", "role": "sector"},
+        {"ticker": "XLF", "name": "미국 금융 ETF", "group": "섹터", "role": "sector"},
+        {"ticker": "XLV", "name": "미국 헬스케어 ETF", "group": "섹터", "role": "sector"},
+        {"ticker": "XLE", "name": "미국 에너지 ETF", "group": "섹터", "role": "sector"},
+        {"ticker": "^VIX", "name": "VIX 변동성", "group": "위험 지표", "role": "volatility"},
+        {"ticker": "KRW=X", "name": "원/달러 환율", "group": "환율", "role": "macro"},
+        {"ticker": "^TNX", "name": "미국 10년 금리", "group": "금리", "role": "macro"},
+    ]
+
+
+@st.cache_data(ttl=60 * 30, show_spinner=False)
+def get_market_price_data(ticker, period="1y"):
+    raw_df = safe_yfinance_download(
+        tickers=ticker,
+        period=period,
+        interval="1d",
+        auto_adjust=False,
+        progress=False,
+        threads=False,
+    )
+    df = normalize_yfinance_data(raw_df, ticker)
+    return set_price_data_attrs(
+        df,
+        "yfinance",
+        "Yahoo Finance 시장 참고 데이터",
+        fallback_reason="시장 흐름 탭은 yfinance 참고 데이터로 표시합니다.",
+        requested_source="yfinance",
+    )
+
+
+def score_to_market_flow_signal(score):
+    if pd.isna(score):
+        return "확인 불가"
+    if score <= 35:
+        return "시장 약세 주의"
+    if score <= 45:
+        return "시장 둔화 참고"
+    if score <= 60:
+        return "시장 중립/확인"
+    if score <= 75:
+        return "시장 흐름 우호"
+    return "시장 흐름 우호 강함"
+
+
+def calculate_market_flow_score(df, item=None):
+    if df is None or df.empty or "Close" not in df.columns:
+        return {
+            "score": np.nan,
+            "signal": "확인 불가",
+            "return_20d": np.nan,
+            "return_60d": np.nan,
+            "rsi": np.nan,
+            "latest_close": np.nan,
+            "latest_date": "-",
+            "data_quality": "데이터 없음",
+        }
+
+    analyzed = calculate_indicators(df)
+    valid = analyzed.dropna(subset=["Close"])
+    if len(valid) < 30:
+        return {
+            "score": np.nan,
+            "signal": "데이터 부족",
+            "return_20d": calculate_period_return(valid, 20),
+            "return_60d": np.nan,
+            "rsi": np.nan,
+            "latest_close": valid["Close"].iloc[-1] if not valid.empty else np.nan,
+            "latest_date": valid.index[-1].date() if not valid.empty else "-",
+            "data_quality": get_data_quality_status(df)[0],
+        }
+
+    latest = valid.iloc[-1]
+    role = item.get("role", "risk") if isinstance(item, dict) else "risk"
+    score_rows = []
+
+    def add(score_value, weight):
+        if pd.notna(score_value):
+            score_rows.append((score_value, weight))
+
+    ma20 = latest.get("MA20", np.nan)
+    ma60 = latest.get("MA60", np.nan)
+    close = latest.get("Close", np.nan)
+    if pd.notna(close) and pd.notna(ma20):
+        add(68 if close >= ma20 else 42, 1.0)
+    if pd.notna(ma20) and pd.notna(ma60):
+        add(70 if ma20 >= ma60 else 40, 1.0)
+
+    ret20 = calculate_period_return(valid, 20)
+    ret60 = calculate_period_return(valid, 60)
+    if role == "volatility":
+        if pd.notna(ret20):
+            add(35 if ret20 > 0 else 68, 1.0)
+        if pd.notna(ret60):
+            add(38 if ret60 > 0 else 65, 0.8)
+    else:
+        if pd.notna(ret20):
+            add(65 if ret20 > 0 else 40, 1.0)
+        if pd.notna(ret60):
+            add(68 if ret60 > 0 else 42, 0.8)
+
+    rsi = latest.get("RSI", np.nan)
+    if pd.notna(rsi):
+        if role == "volatility":
+            add(35 if rsi >= 60 else 62 if rsi <= 45 else 50, 0.6)
+        elif 45 <= rsi <= 65:
+            add(62, 0.6)
+        elif rsi > 65:
+            add(58, 0.6)
+        else:
+            add(42, 0.6)
+
+    if not score_rows:
+        flow_score = np.nan
+    else:
+        values, weights = zip(*score_rows)
+        flow_score = clamp_score_100(np.average(values, weights=weights))
+
+    return {
+        "score": flow_score,
+        "signal": score_to_market_flow_signal(flow_score),
+        "return_20d": ret20,
+        "return_60d": ret60,
+        "rsi": rsi,
+        "latest_close": close,
+        "latest_date": latest.name.date(),
+        "data_quality": get_data_quality_status(df)[0],
+    }
+
+
+def get_market_flow_data():
+    rows = []
+    chart_data = {}
+
+    for item in get_market_watchlist():
+        ticker = item["ticker"]
+        try:
+            df = get_market_price_data(ticker, "1y")
+            result = calculate_market_flow_score(df, item)
+            rows.append(
+                {
+                    "구분": item["group"],
+                    "이름": item["name"],
+                    "코드": ticker,
+                    "시장 흐름 조건 충족도": result["score"],
+                    "흐름 참고": result["signal"],
+                    "20일 변화율": result["return_20d"],
+                    "60일 변화율": result["return_60d"],
+                    "RSI": result["rsi"],
+                    "기준일": result["latest_date"],
+                    "데이터 품질": result["data_quality"],
+                }
+            )
+            chart_data[ticker] = (item, df)
+        except Exception as error:
+            rows.append(
+                {
+                    "구분": item["group"],
+                    "이름": item["name"],
+                    "코드": ticker,
+                    "시장 흐름 조건 충족도": np.nan,
+                    "흐름 참고": "조회 실패",
+                    "20일 변화율": np.nan,
+                    "60일 변화율": np.nan,
+                    "RSI": np.nan,
+                    "기준일": "-",
+                    "데이터 품질": "조회 실패",
+                    "오류": str(error),
+                }
+            )
+
+    return pd.DataFrame(rows), chart_data
+
+
+def build_market_flow_summary(market_df):
+    if market_df is None or market_df.empty:
+        return {"score": np.nan, "comment": "시장 흐름 데이터를 가져오지 못했습니다."}
+
+    score_series = pd.to_numeric(market_df.get("시장 흐름 조건 충족도"), errors="coerce").dropna()
+    if score_series.empty:
+        return {"score": np.nan, "comment": "시장 흐름 조건 충족도를 계산하지 못했습니다."}
+
+    score = clamp_score_100(score_series.mean())
+    weak_count = int((score_series <= 39).sum())
+    strong_count = int((score_series >= 61).sum())
+    comment = f"상승 관심 조건 {strong_count}개, 약세 주의 조건 {weak_count}개가 관찰됩니다."
+    return {"score": score, "comment": comment, "signal": score_to_market_flow_signal(score)}
+
+
+def create_market_flow_chart(df, title):
+    fig = go.Figure()
+    if df is None or df.empty or "Close" not in df.columns:
+        fig.update_layout(title=title)
+        return apply_chart_theme(fig)
+
+    valid = df.dropna(subset=["Close"]).copy()
+    if valid.empty:
+        fig.update_layout(title=title)
+        return apply_chart_theme(fig)
+
+    normalized_close = valid["Close"] / valid["Close"].iloc[0] * 100
+    fig.add_trace(
+        go.Scatter(
+            x=valid.index,
+            y=normalized_close,
+            mode="lines",
+            name="기준 100 상대 흐름",
+            line=dict(color="#2563eb", width=2),
+        )
+    )
+    fig.update_layout(title=title, yaxis_title="기준 100", hovermode="x unified")
+    return apply_chart_theme(fig)
+
+
+def render_market_flow_tab():
+    st.subheader("시장 흐름 참고")
+    st.info(
+        "시장 흐름 탭은 개별 자산 조건 충족도와 별개로 지수, 환율, 금리, 변동성, 섹터 흐름을 함께 보는 참고 화면입니다. "
+        "현재는 yfinance 참고 데이터 기준이며 실제 거래소/증권사 데이터와 차이가 있을 수 있습니다."
+    )
+
+    with st.spinner("시장 흐름 참고 데이터를 가져오는 중입니다..."):
+        market_df, chart_data = get_market_flow_data()
+
+    summary = build_market_flow_summary(market_df)
+    summary_score = summary.get("score", np.nan)
+    summary_signal = summary.get("signal", "확인 불가")
+
+    st.markdown(
+        f"""
+        <div class="metric-grid">
+            <div class="metric-card metric-primary">
+                <div class="label">시장 종합 조건 충족도</div>
+                <div class="value">{summary_score if pd.notna(summary_score) else '-'} / 100</div>
+                <div class="sub">{html.escape(str(summary_signal))}</div>
+            </div>
+            <div class="metric-card">
+                <div class="label">해석 기준</div>
+                <div class="value">참고 자료</div>
+                <div class="sub">개별 자산 점수에 직접 합산하지 않음</div>
+            </div>
+        </div>
+        <div class="basis-card"><b>요약:</b> {html.escape(str(summary.get('comment', '-')))}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    display_df = market_df.copy()
+    for percent_column in ["20일 변화율", "60일 변화율"]:
+        if percent_column in display_df.columns:
+            display_df[percent_column] = display_df[percent_column].apply(format_percent)
+    if "RSI" in display_df.columns:
+        display_df["RSI"] = display_df["RSI"].apply(lambda value: "-" if pd.isna(value) else f"{float(value):.2f}")
+
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    chart_options = {f"{item['name']} ({ticker})": ticker for ticker, (item, _) in chart_data.items()}
+    if chart_options:
+        selected_label = st.selectbox("시장 참고 차트", list(chart_options.keys()))
+        selected_ticker = chart_options[selected_label]
+        _, selected_df = chart_data[selected_ticker]
+        render_data_source_badge(selected_df)
+        st.plotly_chart(create_market_flow_chart(selected_df, selected_label), use_container_width=True)
+
+    st.caption("시장 흐름은 분석 배경을 정리하기 위한 참고 정보이며 특정 자산의 거래 지시가 아닙니다.")
+
+
+def get_default_benchmark(asset_meta, ticker):
+    normalized = normalize_ticker(str(ticker or ""))
+    upper = normalized.upper()
+    asset_type = str(asset_meta.get("asset_type", "")) if isinstance(asset_meta, dict) else ""
+
+    if asset_type == "시장 지수" or upper.startswith("^"):
+        return None
+    if upper in ["TQQQ", "SQQQ", "QLD", "PSQ"]:
+        return {"ticker": "QQQ", "name": "NASDAQ100 ETF"}
+    if upper in ["SOXL", "SOXS", "SMH", "NVDA", "AMD", "AVGO", "INTC", "TSM", "MU"]:
+        return {"ticker": "SMH", "name": "반도체 ETF"}
+    if upper in ["SPY", "VOO", "IVV"]:
+        return {"ticker": "^GSPC", "name": "S&P 500"}
+    if upper in ["QQQ", "AAPL", "MSFT", "GOOGL", "GOOG", "META", "AMZN", "TSLA"]:
+        return {"ticker": "^IXIC", "name": "NASDAQ"}
+    if upper.endswith(".KS"):
+        return {"ticker": "^KS11", "name": "KOSPI"}
+    return {"ticker": "^GSPC", "name": "S&P 500"}
+
+
+@st.cache_data(ttl=60 * 30, show_spinner=False)
+def get_benchmark_data(ticker, period="1y"):
+    if not ticker:
+        return pd.DataFrame()
+    raw_df = safe_yfinance_download(
+        tickers=ticker,
+        period=period,
+        interval="1d",
+        auto_adjust=False,
+        progress=False,
+        threads=False,
+    )
+    df = normalize_yfinance_data(raw_df, ticker)
+    return set_price_data_attrs(
+        df,
+        "yfinance",
+        "Yahoo Finance 벤치마크 참고 데이터",
+        fallback_reason="상대강도 비교용 벤치마크는 yfinance 참고 데이터로 표시합니다.",
+        requested_source="yfinance",
+    )
+
+
+def calculate_relative_strength(asset_df, benchmark_df, benchmark=None):
+    if benchmark is None:
+        return {"available": False, "reason": "시장 지수는 별도 벤치마크 비교를 생략합니다."}
+    if asset_df is None or benchmark_df is None or asset_df.empty or benchmark_df.empty:
+        return {"available": False, "reason": "벤치마크 데이터 부족"}
+    if "Close" not in asset_df.columns or "Close" not in benchmark_df.columns:
+        return {"available": False, "reason": "Close 데이터 부족"}
+
+    asset_close = asset_df["Close"].dropna().copy()
+    benchmark_close = benchmark_df["Close"].dropna().copy()
+    if asset_close.empty or benchmark_close.empty:
+        return {"available": False, "reason": "비교 가능한 종가 데이터 부족"}
+
+    asset_close.index = pd.to_datetime(asset_close.index).normalize()
+    benchmark_close.index = pd.to_datetime(benchmark_close.index).normalize()
+    combined = pd.concat([asset_close.rename("asset"), benchmark_close.rename("benchmark")], axis=1).dropna()
+
+    if len(combined) < 61:
+        return {"available": False, "reason": "RS60 계산에 필요한 공통 거래일 부족"}
+
+    rs20 = (combined["asset"].iloc[-1] / combined["asset"].iloc[-21] - 1) - (
+        combined["benchmark"].iloc[-1] / combined["benchmark"].iloc[-21] - 1
+    )
+    rs60 = (combined["asset"].iloc[-1] / combined["asset"].iloc[-61] - 1) - (
+        combined["benchmark"].iloc[-1] / combined["benchmark"].iloc[-61] - 1
+    )
+    rs_line = combined["asset"] / combined["benchmark"]
+    rs_line = rs_line / rs_line.iloc[0] * 100
+    rs60_high = rs_line.tail(60).max()
+    near_high = bool(pd.notna(rs60_high) and rs60_high > 0 and rs_line.iloc[-1] >= rs60_high * 0.98)
+
+    if rs20 > 0 and rs60 > 0:
+        signal = "시장 대비 상대강도 우세"
+    elif rs20 > 0 and rs60 <= 0:
+        signal = "단기 상대강도 개선"
+    elif rs20 <= 0 and rs60 > 0:
+        signal = "중기 상대강도 유지·단기 둔화"
+    else:
+        signal = "시장 대비 상대강도 약세"
+
+    return {
+        "available": True,
+        "benchmark_ticker": benchmark.get("ticker", "-"),
+        "benchmark_name": benchmark.get("name", benchmark.get("ticker", "-")),
+        "rs20": rs20,
+        "rs60": rs60,
+        "rs_line": rs_line,
+        "near_60d_high": near_high,
+        "signal": signal,
+        "latest_date": combined.index[-1].date(),
+    }
+
+
+def create_relative_strength_chart(result):
+    fig = go.Figure()
+    rs_line = result.get("rs_line") if isinstance(result, dict) else None
+    if rs_line is None or len(rs_line) == 0:
+        fig.update_layout(title="상대강도 RS 추이")
+        return apply_chart_theme(fig)
+
+    fig.add_trace(
+        go.Scatter(
+            x=rs_line.index,
+            y=rs_line.values,
+            mode="lines",
+            name="RS 기준 100",
+            line=dict(color="#2563eb", width=2),
+        )
+    )
+    fig.add_hline(y=100, line_dash="dot", line_color="#94a3b8", annotation_text="기준 100")
+    fig.update_layout(title="벤치마크 대비 상대강도 RS 추이", yaxis_title="상대강도", hovermode="x unified")
+    return apply_chart_theme(fig)
+
+
+def render_relative_strength_panel(result):
+    st.subheader("시장 대비 상대강도 참고")
+
+    if not result or not result.get("available"):
+        reason = result.get("reason", "데이터 부족") if isinstance(result, dict) else "데이터 부족"
+        st.info(f"상대강도 RS20/RS60을 계산하지 않았습니다: {reason}")
+        return
+
+    rs20 = result.get("rs20", np.nan)
+    rs60 = result.get("rs60", np.nan)
+    signal = result.get("signal", "-")
+    benchmark_name = result.get("benchmark_name", "-")
+    benchmark_ticker = result.get("benchmark_ticker", "-")
+    latest_date = result.get("latest_date", "-")
+    high_note = "60일 RS 고점권" if result.get("near_60d_high") else "60일 RS 고점권 아님"
+
+    st.markdown(
+        f"""
+        <div class="metric-grid">
+            <div class="metric-card metric-primary">
+                <div class="label">RS20</div>
+                <div class="value">{format_percent(rs20)}</div>
+                <div class="sub">최근 20거래일 벤치마크 대비</div>
+            </div>
+            <div class="metric-card">
+                <div class="label">RS60</div>
+                <div class="value">{format_percent(rs60)}</div>
+                <div class="sub">최근 60거래일 벤치마크 대비</div>
+            </div>
+            <div class="metric-card">
+                <div class="label">상대강도 판단</div>
+                <div class="value" style="font-size:1.1rem;">{html.escape(str(signal))}</div>
+                <div class="sub">거래 지시가 아닌 시장 대비 흐름 참고</div>
+            </div>
+            <div class="metric-card">
+                <div class="label">비교 기준</div>
+                <div class="value" style="font-size:1.1rem;">{html.escape(str(benchmark_name))}</div>
+                <div class="sub">{html.escape(str(benchmark_ticker))} · 기준일 {html.escape(str(latest_date))}</div>
+            </div>
+        </div>
+        <div class="basis-card"><b>해석 참고:</b> RS20/RS60은 자산 수익률에서 벤치마크 수익률을 뺀 값입니다. {html.escape(high_note)} 여부도 함께 확인하세요.</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("상대강도 차트 보기", expanded=False):
+        st.plotly_chart(create_relative_strength_chart(result), use_container_width=True)
+
+
 def parse_watchlist_input(text, max_count=WATCHLIST_MAX_COUNT):
     raw_items = text.replace(",", "\n").splitlines()
     assets = []
@@ -3406,6 +4054,12 @@ def build_watchlist_failure_row(ticker, error):
         "변동성 리스크": "조회 실패",
         "데이터 출처": "-",
         "데이터 품질": "조회 실패",
+        "데이터 신뢰도 등급": "D",
+        "데이터 신뢰도 점수": 0,
+        "벤치마크": "-",
+        "RS20": np.nan,
+        "RS60": np.nan,
+        "상대강도 판단": "계산 실패",
         "DART 공시 여부": "확인 실패" if get_stock_code(normalized_ticker) else "해당 없음",
         "점검 유형": "조회 실패",
         "종합 점검 조건 충족도": 0,
@@ -3427,6 +4081,7 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
             raise ValueError("일봉 데이터 부족")
 
         analyzed_df = calculate_indicators(daily_df)
+        analyzed_df.attrs.update(daily_df.attrs)
         valid_df = analyzed_df.dropna(subset=SIGNAL_COLUMNS)
 
         if len(valid_df) < 2:
@@ -3448,6 +4103,10 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
         volume_status, volume_score = get_volume_status(latest, previous)
         score_latest = latest.copy()
         score_latest["_volume_score"] = volume_score
+        reliability_result = calculate_data_reliability(analyzed_df, normalized_ticker, asset_meta)
+        benchmark = get_default_benchmark(asset_meta, normalized_ticker)
+        benchmark_df = get_benchmark_data(benchmark["ticker"], "1y") if benchmark else pd.DataFrame()
+        relative_strength_result = calculate_relative_strength(analyzed_df, benchmark_df, benchmark)
 
         row = {
             "자산명": asset_meta.get("name", normalized_ticker),
@@ -3469,6 +4128,17 @@ def analyze_watchlist_ticker(ticker, daily_period, intraday_interval, dart_api_k
             "변동성 리스크": daily_result["risk_level"],
             "데이터 출처": daily_df.attrs.get("data_source", "-"),
             "데이터 품질": get_data_quality_status(daily_df)[0],
+            "데이터 신뢰도 등급": reliability_result.get("grade", "D"),
+            "데이터 신뢰도 점수": reliability_result.get("score", 0),
+            "벤치마크": f"{relative_strength_result.get('benchmark_name', '-')} ({relative_strength_result.get('benchmark_ticker', '-')})"
+            if relative_strength_result.get("available")
+            else "-",
+            "RS20": relative_strength_result.get("rs20", np.nan) if relative_strength_result.get("available") else np.nan,
+            "RS60": relative_strength_result.get("rs60", np.nan) if relative_strength_result.get("available") else np.nan,
+            "상대강도 판단": relative_strength_result.get(
+                "signal",
+                relative_strength_result.get("reason", "계산 실패"),
+            ),
             "DART 공시 여부": disclosure_status,
             "점검 유형": "관망 후보",
             "종합 점검 조건 충족도": calculate_watchlist_score(daily_result, intraday_result, score_latest, disclosures),
@@ -3603,13 +4273,29 @@ def render_watchlist_scanner(dart_api_key, data_source_preference="auto"):
         "레버리지 구조 위험 참고",
         "인버스 방향성 확인 필요",
         "관망 후보",
+        "상대강도 우세",
+        "데이터 신뢰도 A/B",
         "분석 실패",
     ]
     selected_filter = st.selectbox("점검 유형 필터", filter_options)
 
     display_df = result_df.copy()
 
-    if selected_filter != "전체":
+    if selected_filter == "상대강도 우세":
+        rel_series = (
+            display_df["상대강도 판단"]
+            if "상대강도 판단" in display_df.columns
+            else pd.Series("", index=display_df.index)
+        )
+        display_df = display_df[rel_series.astype(str).str.contains("우세", na=False)]
+    elif selected_filter == "데이터 신뢰도 A/B":
+        grade_series = (
+            display_df["데이터 신뢰도 등급"]
+            if "데이터 신뢰도 등급" in display_df.columns
+            else pd.Series("", index=display_df.index)
+        )
+        display_df = display_df[grade_series.astype(str).isin(["A", "B"])]
+    elif selected_filter != "전체":
         display_df = display_df[display_df["점검 유형"] == selected_filter]
 
     display_columns = [
@@ -3632,6 +4318,12 @@ def render_watchlist_scanner(dart_api_key, data_source_preference="auto"):
         "변동성 리스크",
         "데이터 출처",
         "데이터 품질",
+        "데이터 신뢰도 등급",
+        "데이터 신뢰도 점수",
+        "벤치마크",
+        "RS20",
+        "RS60",
+        "상대강도 판단",
         "DART 공시 여부",
         "점검 유형",
         "종합 점검 조건 충족도",
@@ -3640,7 +4332,7 @@ def render_watchlist_scanner(dart_api_key, data_source_preference="auto"):
         if column not in display_df.columns:
             display_df[column] = "-"
 
-    for percent_column in ["1개월 수익률", "최근 5거래일 수익률"]:
+    for percent_column in ["1개월 수익률", "최근 5거래일 수익률", "RS20", "RS60"]:
         if percent_column in display_df.columns:
             display_df[percent_column] = display_df[percent_column].apply(format_percent)
 
@@ -4084,6 +4776,7 @@ def render_single_stock_analysis(
         return
 
     analyzed_df = calculate_indicators(daily_df)
+    analyzed_df.attrs.update(daily_df.attrs)
     valid_df = analyzed_df.dropna(subset=SIGNAL_COLUMNS)
 
     if len(valid_df) < 2:
@@ -4102,9 +4795,15 @@ def render_single_stock_analysis(
     st.caption(f"입력값: {asset_ref['input']} · 분석 코드: {normalized_ticker}")
     render_asset_profile(asset_meta)
     render_data_reference_box(daily_df, normalized_ticker, period_option, show_intraday, intraday_interval)
+    reliability_result = calculate_data_reliability(analyzed_df, normalized_ticker, asset_meta)
+    render_data_reliability_panel(analyzed_df, reliability_result)
 
     render_score_panel(signal_result)
     render_metric_summary(latest, signal_result)
+    benchmark = get_default_benchmark(asset_meta, normalized_ticker)
+    benchmark_df = get_benchmark_data(benchmark["ticker"], "1y") if benchmark else pd.DataFrame()
+    relative_strength_result = calculate_relative_strength(analyzed_df, benchmark_df, benchmark)
+    render_relative_strength_panel(relative_strength_result)
 
     st.subheader("조건 판단 근거")
     for reason in signal_result["reasons"]:
@@ -4299,8 +4998,8 @@ def main():
     if analyze:
         st.session_state.analysis_started = True
 
-    single_tab, scanner_tab, indicator_guide_tab, guide_tab = st.tabs(
-        ["단일 자산 분석", "관심자산 스캐너", "지표 설명", "사용 안내"]
+    single_tab, scanner_tab, market_flow_tab, indicator_guide_tab, guide_tab = st.tabs(
+        ["단일 자산 분석", "관심자산 스캐너", "시장 흐름", "지표 설명", "사용 안내"]
     )
 
     with single_tab:
@@ -4318,6 +5017,9 @@ def main():
 
     with scanner_tab:
         render_watchlist_scanner(dart_api_key, data_source_preference)
+
+    with market_flow_tab:
+        render_market_flow_tab()
 
     with indicator_guide_tab:
         render_indicator_guide()
