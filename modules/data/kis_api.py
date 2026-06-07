@@ -101,6 +101,12 @@ def make_json_request(url, method="GET", headers=None, params=None, body=None, t
             message = payload.get("msg1") or payload.get("message") or f"HTTP {error.code}"
         except Exception:
             message = f"HTTP {error.code}"
+
+        if error.code == 403:
+            message = (
+                f"{message} - KIS 접근이 거절되었습니다. "
+                "KIS_BASE_URL, 실전/모의 키 구분, API 사용 권한을 확인하세요."
+            )
         raise RuntimeError(message) from None
     except urllib.error.URLError as error:
         raise RuntimeError(f"네트워크 오류: {error.reason}") from None
@@ -133,6 +139,12 @@ def get_kis_access_token(app_key, app_secret, base_url):
     return token
 
 
+def get_kis_tr_id(tr_id, is_paper=False):
+    if is_paper and isinstance(tr_id, str) and tr_id.startswith("F"):
+        return f"V{tr_id[1:]}"
+    return tr_id
+
+
 def kis_get(path, tr_id, params, timeout=20):
     config = get_kis_config()
 
@@ -145,7 +157,7 @@ def kis_get(path, tr_id, params, timeout=20):
         "authorization": f"Bearer {token}",
         "appkey": config["app_key"],
         "appsecret": config["app_secret"],
-        "tr_id": tr_id,
+        "tr_id": get_kis_tr_id(tr_id, config["paper"]),
         "custtype": "P",
     }
 
