@@ -117,6 +117,7 @@ def make_json_request(url, method="GET", headers=None, params=None, body=None, t
         raise RuntimeError("JSON 응답을 해석하지 못했습니다.") from None
 
 
+@st.cache_data(ttl=60 * 60 * 23, show_spinner=False)
 def get_kis_access_token(app_key, app_secret, base_url):
     payload = {
         "grant_type": "client_credentials",
