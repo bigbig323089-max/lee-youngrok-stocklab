@@ -787,6 +787,86 @@ def load_custom_css():
                 grid-template-columns: repeat(auto-fit, minmax(164px, 1fr));
             }
 
+            .mobile-summary {
+                display: none;
+                background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+                border: 1px solid var(--line);
+                border-radius: 14px;
+                padding: 13px;
+                margin: 10px 0 14px 0;
+                box-shadow: var(--shadow);
+            }
+
+            .mobile-summary-head {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 10px;
+                margin-bottom: 10px;
+            }
+
+            .mobile-summary-title {
+                font-size: 1.08rem;
+                font-weight: 950;
+                color: var(--text);
+                line-height: 1.22;
+            }
+
+            .mobile-summary-code {
+                color: var(--muted);
+                font-size: 0.76rem;
+                font-weight: 800;
+                margin-top: 3px;
+            }
+
+            .mobile-summary-grid {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 9px;
+            }
+
+            .mobile-summary-card {
+                border: 1px solid var(--line);
+                border-radius: 12px;
+                padding: 10px 11px;
+                background: #ffffff;
+                min-height: 74px;
+            }
+
+            .mobile-summary-card .label {
+                color: var(--muted);
+                font-size: 0.7rem;
+                font-weight: 900;
+                margin-bottom: 5px;
+            }
+
+            .mobile-summary-card .value {
+                color: var(--text);
+                font-size: 1rem;
+                font-weight: 950;
+                line-height: 1.2;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .mobile-summary-card.primary {
+                border-color: #bfdbfe;
+                background: #eff6ff;
+            }
+
+            .mobile-summary-card.primary .value {
+                color: #1d4ed8;
+                font-size: 1.25rem;
+            }
+
+            .mobile-summary-note {
+                margin-top: 10px;
+                color: var(--muted);
+                font-size: 0.74rem;
+                line-height: 1.45;
+            }
+
             @media (max-width: 900px) {
                 .notice-row {
                     grid-template-columns: 1fr;
@@ -821,6 +901,186 @@ def load_custom_css():
 
                 .candidate-grid {
                     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                }
+            }
+
+            @media (max-width: 768px) {
+                .block-container {
+                    padding-left: 0.85rem;
+                    padding-right: 0.85rem;
+                    padding-top: 0.75rem;
+                    padding-bottom: 2rem;
+                }
+
+                .hero {
+                    padding: 16px 15px;
+                    border-radius: 13px;
+                    margin-bottom: 12px;
+                }
+
+                .hero .eyebrow {
+                    font-size: 0.68rem;
+                    padding: 4px 8px;
+                    margin-bottom: 7px;
+                }
+
+                .hero h1 {
+                    font-size: 1.45rem;
+                    line-height: 1.18;
+                    margin-bottom: 6px;
+                }
+
+                .hero p,
+                div[data-testid="stMarkdownContainer"] p {
+                    line-height: 1.55;
+                    font-size: 0.9rem;
+                }
+
+                .notice-row {
+                    gap: 8px;
+                    margin-top: 10px;
+                }
+
+                .notice {
+                    padding: 9px 10px;
+                    font-size: 0.78rem;
+                    line-height: 1.45;
+                }
+
+                .mobile-summary {
+                    display: block;
+                }
+
+                .metric-grid,
+                .metric-grid-secondary {
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    gap: 9px;
+                }
+
+                .metric-card {
+                    padding: 11px;
+                    min-height: 86px;
+                    border-radius: 11px;
+                }
+
+                .metric-card.metric-primary {
+                    grid-column: span 1;
+                }
+
+                .metric-card .label {
+                    font-size: 0.68rem;
+                    margin-bottom: 5px;
+                }
+
+                .metric-card .value,
+                .metric-card.metric-primary .value {
+                    font-size: 1.08rem;
+                }
+
+                .metric-card .sub {
+                    font-size: 0.68rem;
+                    white-space: normal;
+                    display: -webkit-box;
+                    -webkit-line-clamp: 2;
+                    -webkit-box-orient: vertical;
+                }
+
+                .basis-card {
+                    padding: 10px 11px;
+                    margin: 7px 0 12px 0;
+                    font-size: 0.82rem;
+                    line-height: 1.48;
+                }
+
+                .candidate-grid {
+                    grid-template-columns: 1fr;
+                    gap: 10px;
+                }
+
+                .candidate-card {
+                    padding: 13px;
+                    min-height: 118px;
+                }
+
+                .candidate-card .score {
+                    font-size: 1.35rem;
+                }
+
+                div[data-testid="stTabs"] button {
+                    font-size: 0.78rem;
+                    padding-left: 8px;
+                    padding-right: 8px;
+                }
+
+                div[data-testid="stExpander"] {
+                    border-radius: 10px;
+                }
+
+                div[data-testid="stDataFrame"] {
+                    margin-top: 0.25rem;
+                    border-radius: 10px;
+                }
+
+                div[data-testid="stPlotlyChart"] {
+                    padding: 4px;
+                    border-radius: 11px;
+                    overflow-x: hidden;
+                }
+
+                .stPlotlyChart,
+                .stPlotlyChart .js-plotly-plot {
+                    overflow-x: hidden;
+                    max-width: 100%;
+                }
+
+                .stButton > button {
+                    min-height: 46px;
+                    font-size: 0.94rem;
+                }
+
+                section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+                    gap: 0.65rem;
+                }
+            }
+
+            @media (max-width: 480px) {
+                .block-container {
+                    padding-left: 0.65rem;
+                    padding-right: 0.65rem;
+                }
+
+                .hero {
+                    padding: 14px 13px;
+                    border-radius: 12px;
+                }
+
+                .hero h1 {
+                    font-size: 1.28rem;
+                }
+
+                .metric-grid,
+                .metric-grid-secondary {
+                    grid-template-columns: 1fr;
+                }
+
+                .mobile-summary-grid {
+                    grid-template-columns: 1fr;
+                }
+
+                .score-panel {
+                    padding: 13px 12px;
+                }
+
+                .score-band-labels {
+                    grid-template-columns: 1fr 1fr;
+                }
+
+                .score-band-labels span {
+                    font-size: 0.64rem;
+                }
+
+                .basis-card {
+                    font-size: 0.78rem;
                 }
             }
         </style>
@@ -1341,6 +1601,10 @@ def get_signal_badge_class(score):
 
 def get_signal_badge_class_100(score):
     if score is None or pd.isna(score):
+        return "signal-neutral"
+    try:
+        score = float(score)
+    except (TypeError, ValueError):
         return "signal-neutral"
     if score <= 39:
         return "signal-bad"
@@ -2935,6 +3199,72 @@ def render_metric_summary(latest, signal_result):
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_mobile_quick_summary(
+    asset_meta,
+    latest,
+    signal_result,
+    reliability_result,
+    relative_strength_result,
+    analysis_code="-",
+):
+    asset_name = asset_meta.get("name", analysis_code) if isinstance(asset_meta, dict) else analysis_code
+    technical_score = signal_result.get("technical_score", "-")
+    signal_text = signal_result.get("signal", "-")
+    risk_level = signal_result.get("risk_level", "-")
+    reliability_grade = reliability_result.get("grade", "-") if isinstance(reliability_result, dict) else "-"
+
+    if isinstance(relative_strength_result, dict) and relative_strength_result.get("available"):
+        rs20 = format_percent(relative_strength_result.get("rs20", np.nan))
+        rs60 = format_percent(relative_strength_result.get("rs60", np.nan))
+    else:
+        rs20 = "-"
+        rs60 = "-"
+
+    latest_close = format_price(latest.get("Close", np.nan))
+    cards = [
+        ("기술 조건 충족도", f"{technical_score} / 100", "primary"),
+        ("보조 판단", signal_text, ""),
+        ("데이터 신뢰도", f"{reliability_grade}등급", ""),
+        ("최근 종가", latest_close, ""),
+        ("RS20", rs20, ""),
+        ("RS60", rs60, ""),
+        ("변동성 리스크", risk_level, ""),
+        ("분석 코드", analysis_code, ""),
+    ]
+
+    badge_class = get_signal_badge_class_100(technical_score)
+    card_html = (
+        "<div class='mobile-summary'>"
+        "<div class='mobile-summary-head'>"
+        "<div>"
+        f"<div class='mobile-summary-title'>{html.escape(str(asset_name))}</div>"
+        f"<div class='mobile-summary-code'>분석 코드: {html.escape(str(analysis_code))}</div>"
+        "</div>"
+        f"<span class='signal-badge {badge_class}'>{html.escape(str(signal_text))}</span>"
+        "</div>"
+        "<div class='mobile-summary-grid'>"
+    )
+
+    for label, value, class_name in cards:
+        class_attr = f" mobile-summary-card {class_name}".strip()
+        card_html += (
+            f"<div class='{class_attr}'>"
+            f"<div class='label'>{html.escape(str(label))}</div>"
+            f"<div class='value'>{html.escape(str(value))}</div>"
+            "</div>"
+        )
+
+    card_html += (
+        "</div>"
+        "<div class='mobile-summary-note'>"
+        "모바일 빠른 점검용 요약입니다. 세부 지표와 차트는 아래 영역에서 확인하세요."
+        "</div>"
+        "</div>"
+    )
+    st.markdown(card_html, unsafe_allow_html=True)
+
 
 def get_data_quality_status(df):
     if df is None or df.empty:
@@ -4540,36 +4870,40 @@ def render_watchlist_scanner(dart_api_key, data_source_preference="auto"):
     elif selected_filter != "전체":
         display_df = display_df[display_df["점검 유형"] == selected_filter]
 
-    display_columns = [
+    core_columns = [
         "자산명",
         "분석 코드",
         "자산 유형",
         "일봉 기술 조건 충족도",
-        "일봉 보조 판단",
         "1개월 스윙 조건 충족도",
+        "당일 흐름 조건 충족도",
+        "RS20",
+        "RS60",
+        "데이터 신뢰도 등급",
+        "점검 유형",
+        "종합 점검 조건 충족도",
+    ]
+    detail_columns = [
+        "일봉 보조 판단",
         "스윙 참고 신호",
+        "당일 흐름 판단",
         "1개월 수익률",
         "최근 5거래일 수익률",
         "과열/눌림 참고",
         "구조적 위험 참고",
-        "당일 흐름 조건 충족도",
-        "당일 흐름 판단",
         "RSI",
         "MACD 상태",
         "거래량 상태",
         "변동성 리스크",
         "데이터 출처",
         "데이터 품질",
-        "데이터 신뢰도 등급",
         "데이터 신뢰도 점수",
         "벤치마크",
-        "RS20",
-        "RS60",
         "상대강도 판단",
         "DART 공시 여부",
-        "점검 유형",
-        "종합 점검 조건 충족도",
     ]
+    display_columns = list(dict.fromkeys(core_columns + detail_columns))
+
     for column in display_columns:
         if column not in display_df.columns:
             display_df[column] = "-"
@@ -4578,7 +4912,21 @@ def render_watchlist_scanner(dart_api_key, data_source_preference="auto"):
         if percent_column in display_df.columns:
             display_df[percent_column] = display_df[percent_column].apply(format_percent)
 
-    st.dataframe(display_df[display_columns], use_container_width=True, hide_index=True)
+    with st.expander("표 읽는 법", expanded=False):
+        st.write(
+            "모바일에서는 핵심 표에서 조건 충족도, 데이터 신뢰도, 상대강도, 점검 유형만 먼저 확인하고 "
+            "세부 지표는 상세 컬럼에서 따로 확인하는 방식이 더 편합니다."
+        )
+        st.caption("종합 점검 조건 충족도는 여러 자산을 정렬하기 위한 참고값이며, 거래 지시나 결과 예측이 아닙니다.")
+
+    st.dataframe(display_df[core_columns], use_container_width=True, hide_index=True)
+
+    with st.expander("상세 컬럼 보기", expanded=False):
+        st.dataframe(display_df[detail_columns], use_container_width=True, hide_index=True)
+
+    with st.expander("전체 결과 표 보기", expanded=False):
+        st.dataframe(display_df[display_columns], use_container_width=True, hide_index=True)
+
     st.caption("종합 점검 조건 충족도는 정렬용 참고 지표이며, 일봉 기술 조건 충족도와 당일 흐름 조건 충족도를 대체하지 않습니다.")
 
 
@@ -5033,18 +5381,27 @@ def render_single_stock_analysis(
     swing_analyzed_df = calculate_swing_indicators(analyzed_df)
     swing_result = calculate_swing_score_100(swing_analyzed_df, asset_meta)
 
+    reliability_result = calculate_data_reliability(analyzed_df, normalized_ticker, asset_meta)
+    benchmark = get_default_benchmark(asset_meta, normalized_ticker)
+    benchmark_df = get_benchmark_data(benchmark["ticker"], "1y") if benchmark else pd.DataFrame()
+    relative_strength_result = calculate_relative_strength(analyzed_df, benchmark_df, benchmark)
+
     st.subheader(f"{asset_meta.get('name', normalized_ticker)} 분석 요약")
     st.caption(f"입력값: {asset_ref['input']} · 분석 코드: {normalized_ticker}")
+    render_mobile_quick_summary(
+        asset_meta,
+        latest,
+        signal_result,
+        reliability_result,
+        relative_strength_result,
+        normalized_ticker,
+    )
     render_asset_profile(asset_meta)
     render_data_reference_box(daily_df, normalized_ticker, period_option, show_intraday, intraday_interval)
-    reliability_result = calculate_data_reliability(analyzed_df, normalized_ticker, asset_meta)
     render_data_reliability_panel(analyzed_df, reliability_result)
 
     render_score_panel(signal_result)
     render_metric_summary(latest, signal_result)
-    benchmark = get_default_benchmark(asset_meta, normalized_ticker)
-    benchmark_df = get_benchmark_data(benchmark["ticker"], "1y") if benchmark else pd.DataFrame()
-    relative_strength_result = calculate_relative_strength(analyzed_df, benchmark_df, benchmark)
     render_relative_strength_panel(relative_strength_result)
 
     st.subheader("조건 판단 근거")
@@ -5223,6 +5580,7 @@ def main():
 
     with st.sidebar:
         st.header("분석 설정")
+        st.caption("모바일에서는 왼쪽 상단 메뉴를 눌러 분석 설정을 열 수 있습니다.")
         ticker = st.text_input("자산명 또는 코드를 입력하세요", value="삼성전자", help="예: 삼성전자, 005930, 애플, AAPL, SPY, TQQQ, SQQQ")
         data_source_preference = st.selectbox(
             "가격 데이터 출처",
